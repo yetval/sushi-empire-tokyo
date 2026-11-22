@@ -1,6 +1,8 @@
 // Daichō 台帳 — alert rail: the inbox of paper slips at the bottom of the dashboard.
 // Slips are keyed by alert.id, built once and patched per snapshot. Acting on a slip stamps it 済 (fix) or 掟 (rule)
 // when the alert disappears from the next snapshot. Snooze lives in this part's memory only.
+import { unlockDistrict } from '../../core/actions';
+import { AREAS, PROPERTIES } from '../../core/data';
 import { Alert, Severity, applyFix, applyRule } from '../../core/empire';
 import { yen } from '../../core/format';
 import { run } from '../dom';
@@ -19,7 +21,7 @@ const RESTOCK_NOTE = 'Restocking runs itself once you research Scheduled Deliver
 interface Slip {
   a: Alert; el: HTMLElement; sevGlyph: HTMLElement; sevWord: HTMLElement;
   txt: HTMLElement; pre: HTMLElement; who: HTMLButtonElement; post: HTMLElement;
-  fix: HTMLButtonElement; rule: HTMLButtonElement; note: HTMLElement;
+  fix: HTMLButtonElement; alt: HTMLButtonElement; rule: HTMLButtonElement; note: HTMLElement;
   stamping: boolean;
 }
 
@@ -126,7 +128,8 @@ export class AlertRail implements Part {
     rule.setAttribute('aria-label', 'Make it a rule'); rule.title = 'Make it a house rule (掟) so this never comes back';
     const snooze = btn('dc-al-snooze', 'zZ');
     snooze.setAttribute('aria-label', 'Snooze for 2 minutes'); snooze.title = 'Snooze — hide for 2 minutes';
-    head.append(sevWord, fix, rule, snooze);
+    const alt = btn('btn small ghost dc-al-alt', ''); // secondary: unlock the area right here
+    head.append(sevWord, fix, alt, rule, snooze);
     const p = document.createElement('p'); p.className = 'dc-al-txt';
     const pre = document.createElement('span'), post = document.createElement('span');
     const who = btn('dc-al-who', '');
@@ -135,7 +138,7 @@ export class AlertRail implements Part {
     note.setAttribute('role', 'note');
     body.append(head, p, note);
     el.append(tab, body);
-    const slip: Slip = { a, el, sevGlyph: tab, sevWord, txt: p, pre, who, post, fix, rule, note, stamping: false };
+    const slip: Slip = { a, el, sevGlyph: tab, sevWord, txt: p, pre, who, post, fix, alt, rule, note, stamping: false };
 
     const { store } = this.ctx;
     const hoverOn = () => { if (slip.a.restIds.length === 1) store.set({ hover: slip.a.restIds[0] }); };
@@ -148,7 +151,14 @@ export class AlertRail implements Part {
       else { store.st.selected = new Set(ids); store.touchSelected(); }
     });
     fix.addEventListener('click', () => {
-      if (run(fix, applyFix(this.ctx.host.s, slip.a))) this.act(slip.a.id, '済');
+      const a = slip.a;
+      if (a.fix) { if (run(fix, applyFix(this.ctx.host.s, a))) this.act(a.id, '済'); }
+      else if (a.propId) this.ctx.opts.buyLot(a.propId); // opens the concept picker; no stamp (the buy may be cancelled)
+      else if (a.areaId) store.set({ area: a.areaId }); // map switches region + zooms itself
+    });
+    alt.addEventListener('click', () => {
+      const id = slip.a.areaId;
+      if (id && run(alt, unlockDistrict(this.ctx.host.s, id), 'success')) this.act(slip.a.id, '済');
     });
     rule.addEventListener('click', () => {
       const r = slip.a.rule;
@@ -192,12 +202,21 @@ export class AlertRail implements Part {
     if (whoText && a.text.startsWith(whoText)) { set(slip.pre, ''); set(slip.post, a.text.slice(whoText.length)); }
     else { set(slip.pre, whoText ? `${a.text} ` : a.text); set(slip.post, ''); }
 
-    slip.fix.hidden = !a.fix;
-    if (a.fix) {
-      const fixText = a.fix.cost > 0 ? `${a.fix.label} · ${yen(a.fix.cost)}` : a.fix.label;
-      set(slip.fix, fixText);
-      if (slip.fix.title !== fixText) slip.fix.title = fixText; // may ellipsize in a narrow slip
-      slip.fix.classList.toggle('poor', s.cash < a.fix.cost);
+    // primary: the alert's fix, else buy the lot, else show the new area on the map
+    const lot = a.propId ? PROPERTIES[a.propId] : undefined, area = a.areaId ? AREAS[a.areaId] : undefined;
+    const fixText = a.fix ? (a.fix.cost > 0 ? `${a.fix.label} · ${yen(a.fix.cost)}` : a.fix.label)
+      : lot ? `Pick a concept · ${lot.name}` : area ? 'Show on map' : '';
+    slip.fix.hidden = !fixText;
+    set(slip.fix, fixText);
+    if (slip.fix.title !== fixText) slip.fix.title = fixText; // may ellipsize in a narrow slip
+    slip.fix.classList.toggle('poor', s.cash < (a.fix?.cost ?? lot?.price ?? 0));
+    slip.fix.classList.toggle('gold', !a.fix && !!fixText); // growth actions in kin, not shu
+    slip.alt.hidden = !area;
+    if (area) {
+      const altText = `Unlock · ${yen(area.unlock.cost)}`;
+      set(slip.alt, altText);
+      const altAria = `Unlock ${area.name} for ${yen(area.unlock.cost)}`;
+      if (slip.alt.getAttribute('aria-label') !== altAria) slip.alt.setAttribute('aria-label', altAria);
     }
     slip.rule.hidden = !a.rule;
     if (a.rule !== prevRule) { slip.note.hidden = true; slip.rule.removeAttribute('aria-expanded'); }

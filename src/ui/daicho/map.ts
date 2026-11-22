@@ -19,7 +19,7 @@ const backdrop: Record<Region, string> = {
     <path class="river" d="M71,0 C68,10 73,18 69,27 C66,35 71,42 66,50 C64,54 66,57 63,60"/>
     <ellipse class="rail" cx="47" cy="24" rx="16" ry="11"/>
     <rect class="park" x="44" y="26" width="8" height="5" rx="1.6"/>
-    <text class="geo" x="88" y="58.5">東京湾 Tokyo Bay</text><text class="geo" x="73" y="8" transform="rotate(-78 73 8)">隅田川</text>`,
+    <text class="geo" x="91.5" y="60.6">東京湾 Tokyo Bay</text><text class="geo" x="73" y="8" transform="rotate(-78 73 8)">隅田川</text>`,
   japan: `<path class="land" d="M62,8 C66,3 74,3 78,6 C82,9 80,14 76,16 C72,19 66,18 63,15 C60,13 60,10 62,8 Z"/>
     <path class="land" d="M30,44 C36,40 42,40 48,38 C54,36 58,33 62,28 C65,24 68,21 72,20 C75,20 76,23 74,26 C72,30 70,34 66,38 C62,42 56,44 50,46 C44,48 36,49 31,48 C29,47 29,45 30,44 Z"/>
     <path class="land" d="M40,49 C44,48 50,48 52,50 C52,52 46,53 42,52 C40,52 39,50 40,49 Z"/>
@@ -32,7 +32,7 @@ const backdrop: Record<Region, string> = {
     <path class="land" d="M57,12 C64,8 80,8 90,12 C94,16 92,22 86,26 C82,30 78,32 74,34 C70,36 64,34 60,30 C57,26 55,18 57,12 Z"/>
     <path class="land" d="M78,46 C84,44 90,46 91,50 C91,54 86,56 82,55 C78,54 76,50 78,46 Z"/>
     <path class="land" d="M88,20 c1.4,-1 2.4,.4 1.6,2.4 c-.6,1.8 -2.2,2.8 -2.8,1.8 Z"/>
-    <text class="geo" x="34" y="44">大西洋 Atlantic</text><text class="geo" x="96" y="40" text-anchor="end">太平洋 Pacific</text>`,
+    <text class="geo" x="34" y="44">大西洋 Atlantic</text><text class="geo" x="92.5" y="40">太平洋 Pacific</text>`,
 };
 
 /** Region-space (0..100) → viewBox, then push overlapping label boxes apart (deterministic, memoised per region). */
@@ -82,6 +82,7 @@ export class MapView implements Part {
   private pins = new Map<string, PinRef[]>(); // area id (Empire) or 'city' → pin slots
   private sums = new Map<string, SVGTextElement>();
   private badges = new Map<string, SVGTextElement>();
+  private labels: { x: number; t: SVGTextElement[] }[] = []; // Empire area labels, kept inside the viewBox
   private lots: { g: SVGGElement; price: number }[] = [];
   private pop: HTMLElement | null = null;
   private crumbSum: HTMLElement | null = null;
@@ -154,7 +155,7 @@ export class MapView implements Part {
   // ---------------------------------------------------------------- build (once per view)
   private reset(inner: string, label: string): void {
     this.closePop();
-    this.pins.clear(); this.sums.clear(); this.badges.clear(); this.lots = [];
+    this.pins.clear(); this.sums.clear(); this.badges.clear(); this.lots = []; this.labels = [];
     this.wrap.innerHTML = `<svg class="dc-map-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="group" aria-label="${esc(label)}">
       <defs><filter id="dc-ink" x="-5%" y="-5%" width="110%" height="110%"><feTurbulence type="fractalNoise" baseFrequency=".35" numOctaves="2" seed="7"/><feDisplacementMap in="SourceGraphic" scale=".9"/></filter></defs>
       ${inner}</svg>`;
@@ -176,7 +177,7 @@ export class MapView implements Part {
       const name = (y: number) => `<text class="nm" y="${y}"><tspan class="jp">${esc(a.jp.length > 3 ? '' : a.jp)}</tspan> ${esc(shortName(a))}</text>`;
       if (!s.districts.includes(id)) {
         const req = a.unlock.chapter2 && !s.flags.chapter2 ? 'Chapter 2' : `${short(a.unlock.pieces)} 🍣 · ${yen(a.unlock.cost)}`;
-        return `<g class="dc-area locked" transform="translate(${p.x.toFixed(2)},${p.y.toFixed(2)})" role="button" tabindex="0" data-act="locked" data-arg="${id}"
+        return `<g class="dc-area locked" data-x="${p.x.toFixed(2)}" transform="translate(${p.x.toFixed(2)},${p.y.toFixed(2)})" role="button" tabindex="0" data-act="locked" data-arg="${id}"
           aria-label="${esc(a.name)} — locked, needs ${esc(req)}"><circle class="hit" r="5"/><circle class="lk" r="2.8"/><text class="lkc" y=".75">${esc(a.jp[0])}</text>${name(5.4)}<text class="sm" y="7.7">${esc(req)}</text></g>`;
       }
       const vis = n > CAP ? CAP - 1 : n, R = 4.6;
@@ -186,12 +187,13 @@ export class MapView implements Part {
       }).join('');
       const tb = -Math.PI / 2 + ((CAP - 1) / CAP) * Math.PI * 2;
       const badge = n > CAP ? `<text class="more" x="${(Math.cos(tb) * R).toFixed(2)}" y="${(Math.sin(tb) * R + 0.7).toFixed(2)}">+${n - vis}</text>` : '';
-      return `<g class="dc-area${n ? '' : ' empty'}" data-area="${id}" transform="translate(${p.x.toFixed(2)},${p.y.toFixed(2)})">
+      return `<g class="dc-area${n ? '' : ' empty'}" data-area="${id}" data-x="${p.x.toFixed(2)}" transform="translate(${p.x.toFixed(2)},${p.y.toFixed(2)})">
         <g class="stamp" role="button" tabindex="0" data-act="area" data-arg="${id}" aria-label="${esc(a.name)} — ${n} restaurant${n === 1 ? '' : 's'}, open city"><circle class="hit" r="3.2"/>
           <rect x="-2.4" y="-2.4" width="4.8" height="4.8" rx=".7" transform="rotate(-6)"/><text class="cnt" y=".8">${n || '+'}</text></g>
         ${slots}${badge}${name(n ? 8.9 : 5.4)}<text class="sm sum" y="${n ? 11.2 : 7.7}"></text></g>`;
     }).join('');
     this.reset(`<g class="bg" filter="url(#dc-ink)">${backdrop[region]}</g>${nodes}`, `${REGIONS.find((r) => r[0] === region)![2]} map — areas and restaurants`);
+    this.labels = [...this.svg.querySelectorAll<SVGGElement>('.dc-area')].map((g) => ({ x: +g.dataset.x!, t: [...g.querySelectorAll<SVGTextElement>('.nm, .sm')] }));
     for (const g of this.svg.querySelectorAll<SVGGElement>('.dc-area[data-area]')) {
       const id = g.dataset.area!;
       this.pins.set(id, [...g.querySelectorAll<SVGGElement>('.dc-pin')].map((p) => this.ref(p)));
@@ -274,6 +276,17 @@ export class MapView implements Part {
       const cheapest = Object.values(PROPERTIES).filter((p) => p.district === id && !this.s.restaurants[p.id]).reduce((m, p) => Math.min(m, p.price), Infinity);
       const t = ks.length ? `${yen(areaPnl(ks))}/day` : Number.isFinite(cheapest) ? `lots from ${yen(cheapest)}` : 'no lots';
       if (sum.textContent !== t) sum.textContent = t;
+    }
+    // Shift each area's labels so they stay inside the viewBox (text width is only known once rendered, so re-check per tick).
+    for (const l of this.labels) {
+      let lo = Infinity, hi = -Infinity;
+      for (const t of l.t) {
+        const b = t.getBBox(), cur = +(t.getAttribute('x') ?? 0);
+        if (b.width) { lo = Math.min(lo, b.x - cur); hi = Math.max(hi, b.x + b.width - cur); }
+      }
+      if (lo === Infinity) continue; // not rendered yet (pane hidden)
+      const dx = (l.x + lo < 1 ? 1 - (l.x + lo) : l.x + hi > W - 1 ? W - 1 - (l.x + hi) : 0).toFixed(2);
+      for (const t of l.t) if (t.getAttribute('x') !== dx) t.setAttribute('x', dx);
     }
   }
 

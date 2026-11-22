@@ -38,7 +38,7 @@
 
 .dc-al-head .btn.small { font-size: 12px; padding: 1px 7px; }
 .dc-al-fix { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.dc-al-rule { flex: none; }
+.dc-al-rule, .dc-al-alt { flex: none; }
 .dc-al-snooze {
   flex: none; width: 22px; height: 20px; padding: 0; font: 700 11px/1 var(--body); color: var(--sumi2); cursor: pointer;
   background: none; border: 1.5px dotted var(--sumi3); border-radius: 50%;

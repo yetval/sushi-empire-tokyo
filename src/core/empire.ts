@@ -93,7 +93,7 @@ export function empireTotals(s: GameState): EmpireTotals {
     rev7: h.map((d) => d.revenue), profit7: h.map((d) => d.revenue - d.expenses), pieces7: h.map((d) => d.pieces),
     piecesPerSec: pps, avgStars: rs.reduce((a, r) => a + r.reputation, 0) / Math.max(1, rs.length),
     areas: new Set(rs.map((r) => PROPERTIES[r.id].district)).size,
-    stars7: h.map((d) => d.avgStars ?? 0),
+    stars7: h.filter((d) => d.avgStars !== undefined).map((d) => d.avgStars!), // old saves lack ratings: skip, don't fake 0
   };
 }
 

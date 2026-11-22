@@ -9,7 +9,7 @@ import './strip.css';
 
 type K = 'cash' | 'profit' | 'pieces' | 'stars' | 'alerts';
 const TILES: [K, string, string][] = [
-  ['cash', 'Cash', '金'], ['profit', 'Net/day', '益'], ['pieces', 'Pieces/day', '貫'], ['stars', 'Avg rating', '星'], ['alerts', 'Alerts', '報'],
+  ['cash', 'Cash', '金'], ['profit', 'Net/day', '益'], ['pieces', 'Pieces', '貫'], ['stars', 'Rating', '星'], ['alerts', 'Alerts', '報'],
 ];
 // [speed (0 = pause), glyph, aria-label, key]
 const SPEEDS: [0 | 1 | 2 | 4, string, string, string][] = [[0, '⏸', 'Pause', ''], [1, '▶', 'Speed 1×', '1'], [2, '▶▶', 'Speed 2×', '2'], [4, '▶▶▶', 'Speed 4×', '3']];
@@ -25,11 +25,6 @@ export class Strip implements Part {
   private readonly btns: HTMLButtonElement[] = [];
   private readonly cal: { day: HTMLElement; season: HTMLElement; hol: HTMLElement };
   private readonly tiles = {} as Record<K, Tile>;
-  // ponytail: ★ has no per-day history in core, so the strip keeps its own end-of-day samples for this session.
-  // Upgrade path: add avgStars to DaySummary and read it from totals like profit7.
-  private stars7: number[] = [];
-  private starsDay = -1;
-  private starsLast = 0;
 
   constructor(private ctx: Ctx) {
     this.el.className = 'dc-strip';
@@ -116,18 +111,13 @@ export class Strip implements Part {
     if (bar.style.width !== w) bar.style.width = w;
     attr(this.tiles.pieces.li, 'title', `Next: ${m.title} at ${exact(m.pieces)} pieces (${pct}%)`);
 
-    // avg ★ (session-sampled history, see stars7)
-    if (this.starsDay !== s.day) {
-      if (this.starsDay !== -1) { this.stars7.push(this.starsLast); if (this.stars7.length > 7) this.stars7.shift(); }
-      this.starsDay = s.day;
-    }
-    this.starsLast = t.avgStars;
-    const sPrev = this.stars7.length ? this.stars7[this.stars7.length - 1] : null;
-    const sd = t.restaurants && sPrev !== null ? Math.round((t.avgStars - sPrev) * 10) / 10 : null;
+    // avg ★: live value; Δ and spark from day-end samples (stars7), like the other tiles
+    const st = t.stars7, sLast = st.length ? st[st.length - 1] : null, sPrev = prev(st);
+    const sd = sLast !== null && sPrev !== null ? Math.round((sLast - sPrev) * 10) / 10 : null;
     const fmt1 = (n: number) => n.toFixed(1);
     this.tile('stars', t.restaurants ? `★ ${t.avgStars.toFixed(1)}` : '—', this.delta(sd, fmt1),
-      t.restaurants ? `Average rating ${t.avgStars.toFixed(1)} of 5 stars across ${t.restaurants} restaurant${t.restaurants === 1 ? '' : 's'}. ${this.deltaWords(sd, fmt1, 'since yesterday')}` : 'Average rating: no restaurants yet.',
-      [...this.stars7, t.avgStars].slice(-7));
+      t.restaurants ? `Average rating ${t.avgStars.toFixed(1)} of 5 stars across ${t.restaurants} restaurant${t.restaurants === 1 ? '' : 's'}. ${this.deltaWords(sd, fmt1, 'yesterday vs day before')}` : 'Average rating: no restaurants yet.',
+      st.map((v) => v - Math.min(...st))); // ponytail: spark() floors at 0, so shift ★ to show day-to-day shape
 
     // alerts by severity
     const n = { critical: 0, warning: 0, opportunity: 0 };
@@ -135,7 +125,7 @@ export class Strip implements Part {
     const al = this.tiles.alerts, total = snap.alerts.length;
     txt(al.val, total ? String(total) : `${BAND_MARK.good.glyph} All quiet`);
     const html = total
-      ? [n.critical && `<span class="crit">${BAND_MARK.act.glyph} ${n.critical} act now</span>`, n.warning && `<span>${BAND_MARK.watch.glyph} ${n.warning}</span>`, n.opportunity && `<span class="opp">✦ ${n.opportunity}</span>`].filter(Boolean).join('')
+      ? [n.critical && `<span class="crit">${BAND_MARK.act.glyph} ${n.critical}<i> act now</i></span>`, n.warning && `<span>${BAND_MARK.watch.glyph} ${n.warning}</span>`, n.opportunity && `<span class="opp">✦ ${n.opportunity}</span>`].filter(Boolean).join('')
       : '<span>Nothing needs you</span>';
     if (al.dlt.innerHTML !== html) al.dlt.innerHTML = html;
     al.li.classList.toggle('has-crit', n.critical > 0);

@@ -70,3 +70,12 @@
   .dc-strip { flex-wrap: wrap; }
   .dc-strip-time { width: 100%; margin: 0 0 4px; }
 }
+
+/* narrow tiles (≈1000 px dashboards): drop the kanji mark and the "act now" word (both stay in the hidden sentence), tighten type */
+.dc-kpi { container-type: inline-size; }
+.dc-kpi[data-k='alerts'] .dlt i { font-style: normal; }
+@container (max-width: 150px) {
+  .dc-kpi .lbl i, .dc-kpi[data-k='alerts'] .dlt i { display: none; }
+  .dc-kpi .val { font-size: 17px; }
+  .dc-kpi .v { column-gap: 4px; }
+}
