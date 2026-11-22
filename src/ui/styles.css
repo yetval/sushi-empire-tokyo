@@ -622,7 +622,9 @@ table.books tfoot td { border-top: 2px solid var(--sumi); font-weight: 900; }
 
 /* each window is its own stacking context: dashboard tooltips/sticky rows never paint over a sheet or dialog */
 .modal { isolation: isolate; }
-#ui-root .modal.closing, .modal.closing { pointer-events: none; } /* beats #ui-root .modal { pointer-events: auto } */
+/* a closing window's backdrop still absorbs stray clicks (no click-through), but nothing inside it can be activated */
+#ui-root .modal.closing { pointer-events: auto; }
+#ui-root .modal.closing > * { pointer-events: none; }
 
 /* review C */
 .sh-title { min-width: 0; } .sh-title h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
