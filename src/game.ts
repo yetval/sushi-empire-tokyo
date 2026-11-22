@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { audio } from './audio/audio';
 import { emit, on, toast } from './core/bus';
 import * as A from './core/actions';
-import { DISTRICTS, DistrictId, PROPERTIES, RECIPES, ROLES } from './core/data';
+import { AREAS, DISTRICTS, DistrictId, PROPERTIES, RECIPES } from './core/data';
 import { clockStr, short } from './core/format';
 import { PhotoMode } from './photo/photo';
 import { StoryNpcId, checkStoryBeat, dialogueFor } from './core/story';
@@ -11,7 +11,7 @@ import { checkAchievements, rewardText } from './core/achievements';
 import { QuestEvent, ensureQuests, questOnEvent } from './core/quests';
 import { makeReview, pushReview } from './core/reviews';
 import { tickContracts } from './core/contracts';
-import { tickEmpire } from './core/empire';
+import { alerts as empireAlerts, tickEmpire } from './core/empire';
 import * as sim from './core/sim';
 import {
   Avatar, GameState, SAVE_KEY, Ticket, createNewState, exportSave, importSave, loadFromStorage, saveToStorage,
@@ -63,6 +63,8 @@ export class Game implements UIHost {
   private menuAngle = 0;
   private storyTimer = 0;
   private frameNo = 0;
+  private objTimer = 0;
+  private objText = '';
   private basePR = 1;
   private resScale = 1;
   private achTimer = 0;
@@ -326,10 +328,16 @@ export class Game implements UIHost {
     const p = s.lifetime.pieces;
     const nm = sim.nextMilestone(s);
     const goal = `Next: ${nm.title} — ${short(p)} / ${short(nm.pieces)} 🍣`;
-    if (p >= ROLES.chef.unlockPieces && !s.staff.some((e) => e.role === 'chef')) return 'Press Tab and open Staff to hire your first chef.';
-    if (s.staff.some((e) => e.role === 'chef') && !s.staff.some((e) => e.role === 'server')) return 'Hire a server so the stand can take orders and serve them on its own.';
-    for (const d of ['shibuya', 'shinjuku', 'ginza'] as DistrictId[])
-      if (!s.districts.includes(d) && p >= DISTRICTS[d].unlock.pieces && s.cash >= DISTRICTS[d].unlock.cost) return `You can open ${DISTRICTS[d].name}! Tab → Expansion`;
+    // owner-first: get the stand running itself, then grow a chain
+    if (!s.staff.some((e) => e.role === 'chef')) return 'You are the owner now: press Tab and hire a chef for the stand.';
+    if (!sim.isAutomated(s, 'asakusa_stand')) return 'Hire a server too. Chef + server = the stand runs itself.';
+    const n = Object.keys(s.restaurants).length;
+    if (n < 3) return `Open restaurant #${n + 1}: Tab → Empire, pick a lot and a format (kiosk, sushi bar…).`;
+    const crit = empireAlerts(s).find((a) => a.severity === 'critical');
+    if (crit) return `⚠️ ${crit.text}`;
+    if (!s.research.includes('ops_center') && !s.staff.some((e) => e.role === 'manager') && p >= 2_000) return 'Tired of micromanaging? Research Operations Center or hire a manager to enable house rules.';
+    for (const a of Object.values(AREAS))
+      if (!s.districts.includes(a.id) && p >= a.unlock.pieces && s.cash >= a.unlock.cost && (!a.unlock.chapter2 || s.flags.chapter2)) return `New market: ${a.name} is ready to unlock. Tab → Empire map`;
     if (s.flags.chapter2 && !s.flags.seenChapter2Hint) return 'Chapter 2: franchises, cities and HQ in Tab → Empire';
     return goal;
   }
@@ -517,7 +525,8 @@ export class Game implements UIHost {
     }
     if (this.s.tutorial === 4 && this.s.flags.boughtOnce) this.advanceTutorial(5);
     if (this.s.tutorial === 5 && Object.values(this.s.restaurants).some((r) => Object.keys(r.upgrades).length)) this.advanceTutorial(6);
-    this.ui.setObjective(tut ? tut.text : this.dynamicObjective());
+    if (tut) this.ui.setObjective(tut.text);
+    else if ((this.objTimer += dt) > 1 || !this.objText) { this.objTimer = 0; this.objText = this.dynamicObjective(); this.ui.setObjective(this.objText); }
     this.markerTarget = tut?.target ?? null;
     this.marker.visible = !!this.markerTarget && !this.busy;
     if (this.markerTarget) this.marker.position.set(this.markerTarget.x, 2.6 + Math.sin(performance.now() / 250) * 0.18, this.markerTarget.z);

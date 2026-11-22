@@ -123,7 +123,7 @@ export function createNewState(name = 'Chef', company = 'Sushi Empire'): GameSta
   const now = Date.now();
   return {
     version: SAVE_VERSION, createdAt: now, lastSaved: now, clock: 0, playTime: 0,
-    day: 1, minute: START_MINUTE, cash: 5_000,
+    day: 1, minute: START_MINUTE, cash: 12_000, // enough to hire a first crew right after the tutorial
     lifetime: { pieces: 0, revenue: 0, expenses: 0, customers: 0, tips: 0, manualOrders: 0, bestOrder: 0, lost: 0, perfectCooks: 0, criticsWowed: 0, fastestServe: 0 },
     quests: { day: 0, list: [], streak: 0 }, reviews: {}, contracts: createContractState(),
     piecesByRecipe: {},

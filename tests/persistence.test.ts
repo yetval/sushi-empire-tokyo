@@ -59,7 +59,7 @@ describe('save recovery', () => {
     storage.setItem(BACKUP_KEY, serialize(createNewState()));
     storage.setItem(SAVE_KEY, JSON.stringify({ cash: 123, ...fields }));
 
-    expect(loadFromStorage(storage)?.cash).toBe(5_000);
+    expect(loadFromStorage(storage)?.cash).toBe(createNewState().cash);
   });
 
   it('tries the backup when reading the primary raises an error', () => {
@@ -70,7 +70,7 @@ describe('save recovery', () => {
       return MemoryStorage.prototype.getItem.call(storage, key);
     });
 
-    expect(loadFromStorage(storage)?.cash).toBe(5_000);
+    expect(loadFromStorage(storage)?.cash).toBe(createNewState().cash);
   });
 });
 
