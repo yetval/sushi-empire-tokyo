@@ -58,6 +58,8 @@ export interface Ctx {
   opts: { openRestaurant(restId: string): void; buyLot(propId: string): void };
   /** Ask the shell to rebuild the snapshot now (after an action changed state) and re-render all parts. */
   refresh(): void;
+  /** Latest snapshot (for store-driven re-renders between ticks, e.g. hover/selection). */
+  snap(): Snap;
 }
 
 /** Every part implements this. render() must PATCH existing DOM (no full innerHTML rebuild of lists per tick). */

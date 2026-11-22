@@ -1,0 +1,33 @@
+/* Daichō 台帳 — shell layout + shared bits (spark, glyph, band marks). Parts style themselves with dc-<part>- prefixes. */
+.dc-root {
+  --dc-good: var(--matcha); --dc-watch: var(--kin2); --dc-act: var(--shu);
+  display: grid; width: 100%; height: 100%; min-height: 0; gap: 10px;
+  grid-template-columns: minmax(0, 58fr) minmax(0, 42fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas: 'strip strip' 'map ledger' 'rail rail';
+  font-variant-numeric: tabular-nums; color: var(--sumi);
+}
+.dc-a-strip { grid-area: strip; }
+.dc-a-map { grid-area: map; min-height: 0; min-width: 0; }
+.dc-a-ledger { grid-area: ledger; min-height: 0; min-width: 0; }
+.dc-a-rail { grid-area: rail; min-width: 0; }
+
+/* sparkline */
+.dc-spark { display: inline-block; vertical-align: middle; overflow: visible; }
+.dc-spark path { fill: none; stroke: var(--sumi); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.dc-spark circle { fill: var(--sumi); }
+.dc-spark .z { stroke: var(--sumi3); stroke-width: 1; stroke-dasharray: 2 2; }
+.dc-spark.on-dark path { stroke: var(--washi); } .dc-spark.on-dark circle { fill: var(--washi); } .dc-spark.on-dark .z { stroke: rgba(242, 232, 213, .45); }
+
+/* concept glyph */
+.dc-glyph { display: inline-block; vertical-align: -2px; flex: none; }
+.dc-glyph path { fill: var(--sumi); stroke: none; }
+
+/* health band mark: glyph + colour + (visually hidden) word */
+.dc-band { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; font: 700 11px var(--body); line-height: 1; border: 1.5px solid currentColor; }
+.dc-band.good { color: var(--dc-good); } .dc-band.watch { color: var(--dc-watch); } .dc-band.act { color: var(--washi); background: var(--dc-act); border-color: var(--shu2); }
+.dc-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+@media (max-width: 980px) {
+  .dc-root { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(220px, 40%) minmax(0, 1fr) auto; grid-template-areas: 'strip' 'map' 'ledger' 'rail'; }
+}

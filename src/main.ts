@@ -1,11 +1,21 @@
+import { done, fail, fontsReady, step, webglSupported } from './boot/boot';
 import './ui/styles.css';
 import { Game } from './game';
 
-const canvas = document.getElementById('game') as HTMLCanvasElement;
-try {
-  (window as any).game = new Game(canvas);
-} catch (e) {
-  console.error(e);
-  document.body.innerHTML = `<div style="font:20px sans-serif;padding:40px;color:#fff;background:#222;height:100vh">
-    Sushi Empire: Tokyo needs WebGL. Please use an up-to-date Chrome, Edge, Firefox or Safari.<br><small>${String(e)}</small></div>`;
+// The <canvas id="game"> is also exposed as window.game; shadow it so `window.game` means the Game once it exists.
+(window as any).game = null;
+
+async function start(): Promise<void> {
+  if (!webglSupported()) { fail(); return; }
+  await step(65, 'Loading fonts…', fontsReady(), 3000);
+  await step(85, 'Building Tokyo…');
+  try {
+    (window as any).game = new Game(document.getElementById('game') as HTMLCanvasElement);
+  } catch (e) {
+    console.error(e);
+    fail(e);
+    return;
+  }
+  done();
 }
+void start();

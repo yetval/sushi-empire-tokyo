@@ -14,6 +14,7 @@ const logs = [];
 page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') logs.push(`[${m.type()}] ${m.text()}`); });
 page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
 await page.goto(url, { waitUntil: 'networkidle' });
+await page.waitForFunction(() => window.game && window.game.s, null, { timeout: 30000 }); // game boots after fonts
 await page.evaluate(() => localStorage.clear());
 await page.waitForTimeout(500);
 if (js) { try { const r = await page.evaluate(js); if (r !== undefined) console.log('eval result:', JSON.stringify(r)); } catch (e) { logs.push('[eval] ' + e.message); } }

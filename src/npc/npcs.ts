@@ -156,6 +156,7 @@ interface Cust {
   joinT: number; patience: number; ticketId: number | null;
   seat: number; stand: number; orderTimer: number; eatT: number; reactT: number; reactText: string | null;
   claimed: boolean; fade: number; faceYaw: number | null; sitting: boolean; plate: THREE.Object3D | null;
+  stack: number; stackT: number; // kaiten: empty plates piling up while eating
 }
 
 interface SiteRT {
@@ -166,6 +167,11 @@ interface SiteRT {
 interface Staff {
   e: Employee; key: string; siteId: string; char: Character; home: Spot;
   path: THREE.Vector3[]; target: Cust | null; ticketId: number | null; plate: THREE.Object3D | null; timer: number; anim: Anim;
+}
+
+interface Rider {
+  siteId: string; char: Character; scooter: THREE.Group; state: 'ride' | 'walkIn' | 'wait' | 'walkOut' | 'leave';
+  path: THREE.Vector3[]; exit: THREE.Vector3[]; park: THREE.Vector3; pickup: Spot; t: number;
 }
 
 interface Ped { char: Character; lane: THREE.Vector3[]; t: number; dir: number; speed: number; umbrella: THREE.Object3D | null; wantsUmbrella: boolean }
@@ -209,7 +215,7 @@ export class NPCManager {
     this.refresh(s);
   }
 
-  private charCount(): number { return this.customers.length + this.customers.filter((c) => c.child).length + this.peds.length + this.staff.length + this.story.length; }
+  private charCount(): number { return this.customers.length + this.customers.filter((c) => c.child).length + this.peds.length + this.staff.length + this.story.length + this.riders.length; }
 
   // ------------------------------------------------------------ pedestrians
   private spawnPeds(s: GameState): void {
@@ -247,7 +253,7 @@ export class NPCManager {
   // ------------------------------------------------------------ staff
   refresh(s: GameState): void {
     const want = s.staff.filter((e) => e.restaurant && this.sites.has(e.restaurant) && s.restaurants[e.restaurant]);
-    const keyOf = (e: Employee) => `${e.id}:${e.restaurant}:${s.restaurants[e.restaurant!].uniform}:${e.role}`;
+    const keyOf = (e: Employee) => `${e.id}:${e.restaurant}:${s.restaurants[e.restaurant!].uniform}:${e.role}:${s.restaurants[e.restaurant!].concept}`;
     const keys = new Set(want.map(keyOf));
     for (const st of this.staff.filter((x) => !keys.has(x.key))) { if (st.target) st.target.claimed = false; st.char.dispose(); }
     this.staff = this.staff.filter((x) => keys.has(x.key));
@@ -273,7 +279,14 @@ export class NPCManager {
       const at = this.staff.filter((x) => x.siteId === rt.site.id);
       const chefs = at.filter((x) => x.e.role === 'chef'), srv = at.filter((x) => x.e.role === 'server');
       // more staff than work spots: extras still count in the sim but aren't rendered (no stacking)
-      chefs.forEach((x, i) => { x.home = rt.site.chefs[i % rt.site.chefs.length]; x.char.root.userData.hidden = i >= rt.site.chefs.length; });
+      let spots = rt.site.chefs;
+      if (s.restaurants[rt.site.id]?.concept === 'omakase' && rt.site.queue[0]) {
+        // omakase: chefs work at the counter facing the guests
+        const q = rt.site.queue[0];
+        spots = [...spots].sort((a, b) => Math.hypot(a.x - q.x, a.z - q.z) - Math.hypot(b.x - q.x, b.z - q.z))
+          .map((sp) => ({ x: sp.x, z: sp.z, yaw: Math.atan2(q.x - sp.x, q.z - sp.z) }));
+      }
+      chefs.forEach((x, i) => { x.home = spots[i % spots.length]; x.char.root.userData.hidden = i >= spots.length; });
       srv.forEach((x, i) => { x.home = rt.site.servers[i % rt.site.servers.length]; x.char.root.userData.hidden = i >= rt.site.servers.length; });
       for (const x of at) {
         if (x.e.role === 'manager') x.home = rt.site.manager;
@@ -384,7 +397,7 @@ export class NPCManager {
   private spawnCustomer(s: GameState, rt: SiteRT, playerPos: THREE.Vector3, near = false): void {
     const siteId = rt.site.id;
     const tutorial = siteId === 'asakusa_stand' && s.tutorial < 4;
-    let type: CustomerType = tutorial ? 'office' : sim.pickCustomerType(s, PROPERTIES[siteId].district);
+    let type: CustomerType = tutorial ? 'office' : sim.pickCustomerType(s, PROPERTIES[siteId].district, s.minute, siteId);
     const doorV = vs(rt.site.door);
     if (type === 'vip' && doorV.distanceTo(playerPos) > 30) type = 'tourist';
     let order = sim.makeOrder(s, siteId, type);
@@ -402,7 +415,7 @@ export class NPCManager {
       id: nextCustomerId++, type, siteId, char: ch, bubble, order, vip: type === 'vip', tutorial,
       state: 'arrive', path: inR.slice(1), exit: outR, speed: rnd(1.3, 1.7),
       joinT: 0, patience: this.patienceFor(s, siteId, type) * (tutorial ? 4 : 1), ticketId: null,
-      seat: -1, stand: -1, orderTimer: 0, eatT: 0, reactT: 0, reactText: null, claimed: false, fade: 0, faceYaw: null, sitting: false, plate: null,
+      seat: -1, stand: -1, orderTimer: 0, eatT: 0, reactT: 0, reactText: null, claimed: false, fade: 0, faceYaw: null, sitting: false, plate: null, stack: 0, stackT: 0,
     };
     if (type === 'family') {
       const ca = baseAvatar(); ca.hairStyle = pick([0, 3]);
@@ -424,7 +437,7 @@ export class NPCManager {
     rt.queue = rt.queue.filter((x) => x !== c);
     this.reflowQueue(rt);
     const ns = this.activeSeats(s, rt.site.id);
-    const seat = rt.seats.findIndex((x, i) => i < ns && x === null);
+    const seat = concept(s, rt.site.id) === 'kiosk' ? -1 : rt.seats.findIndex((x, i) => i < ns && x === null);
     if (seat >= 0) { rt.seats[seat] = c; c.seat = seat; const sv = vs(rt.site.seats[seat]); c.path = [aisle(rt.site, sv), sv]; c.faceYaw = rt.site.seats[seat].yaw; }
     else {
       let st = rt.stand.findIndex((x) => x === null);
@@ -471,10 +484,15 @@ export class NPCManager {
     if (res.tip > 1) c.reactText += ' 💰 tip!';
     c.reactT = 2.5;
     c.ticketId = null;
-    const plate = makePlate(c.order.recipe, c.order.pieces);
-    plate.scale.setScalar(1.3);
+    const cc = concept(s, c.siteId);
+    const plate = cc === 'kiosk' ? takeoutBag() : makePlate(c.order.recipe, c.order.pieces);
+    if (cc !== 'kiosk') plate.scale.setScalar(1.3);
     c.char.hands.add(plate); c.plate = plate;
-    if (c.seat >= 0) { c.state = 'eating'; c.sitting = true; c.eatT = rnd(4, 8); }
+    if (c.seat >= 0) {
+      c.state = 'eating'; c.sitting = true;
+      if (cc === 'kaiten') { c.stack = 0; c.stackT = 0; c.eatT = 2 + 1.6 * Math.ceil(c.order.pieces / 2); }
+      else c.eatT = cc === 'omakase' ? rnd(14, 20) : rnd(4, 8);
+    }
     else { if (c.stand >= 0 && rt.stand[c.stand] === c) rt.stand[c.stand] = null; this.leave(c, null); c.reactT = 2.5; }
     return true;
   }
@@ -510,6 +528,14 @@ export class NPCManager {
       if (c.state === 'toSpot' && !c.path.length) { c.state = 'waiting'; c.sitting = c.seat >= 0; }
       if (c.state === 'eating') {
         c.eatT -= dt;
+        if (c.stackT >= 0 && concept(s, c.siteId) === 'kaiten') {
+          c.stackT += dt;
+          if (c.stackT > 1.6 && c.stack < Math.ceil(c.order.pieces / 2) - 1 && c.plate) {
+            c.stackT = 0; c.stack++;
+            const e = new THREE.Mesh(EMPTY_PLATE, propMat(pick(['#e63946', '#2b5aa8', '#f4a261', '#2a9d8f'])));
+            e.position.y = -0.03 - c.stack * 0.03; c.plate.add(e); // pile grows under the current plate
+          }
+        }
         if (c.eatT <= 0) { c.plate?.removeFromParent(); c.plate = null; this.leave(c, null); }
       }
       // animation
@@ -606,6 +632,65 @@ export class NPCManager {
     }
   }
 
+  // ------------------------------------------------------------ ghost-kitchen delivery riders (visual only)
+  private riders: Rider[] = [];
+  private riderAcc = new Map<string, { last: number; acc: number }>();
+
+  private updateRiders(dt: number, s: GameState, running: boolean, animate: (ch: Character, dt: number) => void): void {
+    if (running) for (const rt of this.sites.values()) {
+      const r = s.restaurants[rt.site.id];
+      if (!r || r.concept !== 'ghost') continue;
+      const st = this.riderAcc.get(rt.site.id) ?? { last: r.day.pieces, acc: 0 };
+      st.acc += Math.max(0, r.day.pieces - st.last); // day rollover resets pieces → negative delta ignored
+      st.last = r.day.pieces;
+      this.riderAcc.set(rt.site.id, st);
+      // one rider per ~6 pieces delivered, at most 3 waiting per kitchen
+      if (st.acc >= 6 && this.riders.filter((x) => x.siteId === rt.site.id).length < 3 && this.charCount() < MAX_CHARS) {
+        st.acc -= 6;
+        this.spawnRider(rt);
+      }
+      if (st.acc > 30) st.acc = 30; // don't build an endless backlog of riders
+    }
+    for (const rd of [...this.riders]) {
+      const root = rd.char.root;
+      rd.t -= dt;
+      if (rd.state === 'ride' || rd.state === 'leave') {
+        const done = walk(rd.scooter, rd.path, 6, dt);
+        root.position.copy(rd.scooter.position); root.rotation.y = rd.scooter.rotation.y;
+        rd.char.anim = 'sit'; rd.char.speed = 0;
+        if (done && rd.state === 'ride') { rd.state = 'walkIn'; rd.path = [vs(rd.pickup)]; }
+        else if (done) { this.removeRider(rd); continue; }
+      } else if (rd.state === 'walkIn' || rd.state === 'walkOut') {
+        const done = walk(root, rd.path, 1.8, dt);
+        rd.char.anim = rd.state === 'walkOut' ? 'carry' : 'walk'; rd.char.speed = 1.8;
+        if (done && rd.state === 'walkIn') { rd.state = 'wait'; rd.t = rnd(1.5, 3.5); }
+        else if (done) { rd.state = 'leave'; rd.path = rd.exit.slice(); }
+      } else {
+        rd.char.anim = 'idle'; rd.char.speed = 0;
+        root.rotation.y = turn(root.rotation.y, rd.pickup.yaw, dt * 6);
+        if (rd.t <= 0) { rd.char.hands.add(takeoutBag()); rd.state = 'walkOut'; rd.path = [rd.park.clone()]; }
+      }
+      animate(rd.char, dt);
+    }
+  }
+
+  private spawnRider(rt: SiteRT): void {
+    const door = vs(rt.site.door);
+    const { inR, outR } = this.routes(door, 24);
+    const a = baseAvatar(); a.headwear = 3; a.shirt = pick(['#2a9d8f', '#e76f51', '#f4a261', '#264653']);
+    const ch = new Character(a, { bag: '#e63946' });
+    const scooter = makeScooter();
+    scooter.position.copy(inR[0]);
+    this.group.add(ch.root, scooter);
+    const pickup = rt.site.queue[0] ?? rt.site.door;
+    this.riders.push({ siteId: rt.site.id, char: ch, scooter, state: 'ride', path: inR.slice(1), exit: outR.slice(1), park: door, pickup, t: 0 });
+  }
+
+  private removeRider(rd: Rider): void {
+    rd.char.dispose(); rd.scooter.removeFromParent();
+    this.riders = this.riders.filter((x) => x !== rd);
+  }
+
   // ------------------------------------------------------------ public API
   /** Spawn/move pedestrians, customers (using sim.visibleSpawnPerMin), staff and story NPCs. */
   update(dt: number, s: GameState, playerPos: THREE.Vector3, _night: number): void {
@@ -624,10 +709,17 @@ export class NPCManager {
       if (!far) ch.update(d);
       else if ((fn + (ch.root.id & 3)) % 4 === 0) ch.update(d * 4);
     };
-    if (running) this.updateSpawns(dt, s, playerPos);
-    this.updateCustomers(dt, s, running, animate);
-    this.updateStaff(dt, s, animate);
-    this.updatePeds(dt, s.event?.id === 'rain', animate);
+    // time speed (up to 4×) can hand us large dt: sub-step movement/state, animate once with the full dt
+    const steps = Math.max(1, Math.ceil(dt / 0.06)), h = dt / steps;
+    const noop = () => {};
+    for (let i = 0; i < steps; i++) {
+      const an = i === steps - 1 ? (ch: Character) => animate(ch, dt) : noop;
+      if (running) this.updateSpawns(h, s, playerPos);
+      this.updateCustomers(h, s, running, an);
+      this.updateStaff(h, s, an);
+      this.updatePeds(h, s.event?.id === 'rain', an);
+      this.updateRiders(h, s, running, an);
+    }
     this.updatePlates(s);
     for (const st of this.story) {
       const root = st.char.root;
@@ -692,12 +784,33 @@ export class NPCManager {
     this.unsub.forEach((u) => u());
     for (const c of this.customers) { c.bubble.dispose(); c.char.dispose(); c.child?.dispose(); }
     for (const x of [...this.staff, ...this.peds, ...this.story]) x.char.dispose();
+    for (const rd of this.riders) rd.char.dispose();
+    this.riders = [];
     this.group.removeFromParent();
     this.customers = []; this.staff = []; this.peds = []; this.story = [];
   }
 }
 
 // ---------------------------------------------------------------- helpers
+const concept = (s: GameState, id: string) => s.restaurants[id]?.concept ?? 'bar';
+const EMPTY_PLATE = new THREE.CylinderGeometry(0.17, 0.14, 0.025, 16);
+const BAG_GEO = new THREE.BoxGeometry(0.26, 0.22, 0.16);
+const BAG_MAT = new THREE.MeshStandardMaterial({ color: '#c8a27a', roughness: 0.9 });
+function takeoutBag(): THREE.Object3D { const m = new THREE.Mesh(BAG_GEO, BAG_MAT); m.position.y = -0.05; return m; }
+
+const SCOOTER_MATS = { body: new THREE.MeshStandardMaterial({ color: '#e63946', roughness: 0.5 }), dark: new THREE.MeshStandardMaterial({ color: '#222', roughness: 0.8 }), box: new THREE.MeshStandardMaterial({ color: '#ffd166', roughness: 0.6 }) };
+const SCOOTER_GEO = { body: new THREE.BoxGeometry(0.32, 0.25, 1.1), wheel: new THREE.CylinderGeometry(0.2, 0.2, 0.1, 12), box: new THREE.BoxGeometry(0.42, 0.38, 0.42), bar: new THREE.BoxGeometry(0.05, 0.6, 0.05) };
+/** Delivery scooter facing +z; the rider sits at ~0.45m. Shared geometry → cheap. */
+function makeScooter(): THREE.Group {
+  const g = new THREE.Group();
+  const add = (geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, rz = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.z = rz; m.castShadow = true; g.add(m); };
+  add(SCOOTER_GEO.body, SCOOTER_MATS.body, 0, 0.3, 0);
+  add(SCOOTER_GEO.wheel, SCOOTER_MATS.dark, 0, 0.2, 0.45, Math.PI / 2);
+  add(SCOOTER_GEO.wheel, SCOOTER_MATS.dark, 0, 0.2, -0.45, Math.PI / 2);
+  add(SCOOTER_GEO.bar, SCOOTER_MATS.dark, 0, 0.7, 0.48);
+  add(SCOOTER_GEO.box, SCOOTER_MATS.box, 0, 0.72, -0.42);
+  return g;
+}
 /** Closest point on the door→queue aisle line (keeps guests from walking through front walls). */
 function aisle(site: RestaurantSite, p: THREE.Vector3): THREE.Vector3 {
   const a = vs(site.door), b = site.queue[0] ? vs(site.queue[0]) : a;
