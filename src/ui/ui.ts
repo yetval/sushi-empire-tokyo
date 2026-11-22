@@ -116,11 +116,14 @@ export class UI {
     setTimeout(() => { m.el.remove(); m.el.classList.remove('closing'); }, 200);
     this.syncInert();
     const prev = m.prev as HTMLElement | null;
-    if (prev?.isConnected && !prev.closest('[inert]')) prev.focus({ preventScroll: true });
+    if (prev && prev !== document.body && prev.isConnected && !prev.closest('[inert], .closing')) prev.focus({ preventScroll: true });
     else {
       // the original target vanished (e.g. a re-rendered list): land in the window underneath instead of <body>
       const top = this.stack[this.stack.length - 1]?.el;
-      (top?.querySelector<HTMLElement>('.tab[aria-current], .stab[aria-current], button:not([disabled])') ?? top)?.focus({ preventScroll: true });
+      // prefer the active tab; never an arbitrary button (a stray Enter on ✕ would close the window)
+      const tab = top?.querySelector<HTMLElement>('.tab[aria-current], .stab[aria-current]');
+      if (top && !tab && top.tabIndex < 0) top.tabIndex = -1;
+      (tab ?? top)?.focus({ preventScroll: true });
     }
   }
   private has(kind: string) { return this.stack.find((m) => m.kind === kind); }
