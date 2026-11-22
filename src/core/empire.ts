@@ -139,7 +139,7 @@ export function alerts(s: GameState): Alert[] {
   const use = ingredientUsePerSec(s);
   const low = INGREDIENT_IDS.filter((i) => use[i] > 0 && s.inventory[i] / (use[i] * DAY_SECONDS) < 0.35);
   if (low.length && !sim.autoRestockOn(s)) {
-    const cost = Math.round(low.reduce((a, i) => a + Math.max(0, Math.ceil(use[i] * DAY_SECONDS) - s.inventory[i]) * sim.ingredientPrice(s, i) * 1.08, 0));
+    const cost = Math.ceil(low.reduce((a, i) => a + Math.max(0, Math.ceil(use[i] * DAY_SECONDS) - s.inventory[i]) * sim.ingredientPrice(s, i) * 1.08, 0)) + low.length; // round up: never show less than it costs
     out.push({ id: 'stock', severity: low.some((i) => s.inventory[i] < 5) ? 'critical' : 'warning', kind: 'stock', restIds: group((x) => x.stockDays < 0.35), text: `Low on ${low.map((i) => INGREDIENTS[i].name.toLowerCase()).slice(0, 3).join(', ')}${low.length > 3 ? '…' : ''}: kitchens will stall.`, fix: { id: 'restock', label: 'Restock 1 day', cost }, rule: 'autoRestock', ingredients: low });
   }
   const overloaded = group((x) => x.automated && x.load > 1.25);
@@ -196,7 +196,7 @@ export function applyFix(s: GameState, a: Alert): string | null {
     const use = ingredientUsePerSec(s);
     for (const i of a.ingredients ?? []) {
       const want = Math.ceil(use[i] * DAY_SECONDS) - s.inventory[i];
-      if (want > 0 && sim.buyIngredient(s, i, want, true) < want) err = 'Could not buy a full day (cash or storage)';
+      if (want > 0 && sim.buyIngredient(s, i, want, true) < want - 1) err = 'Could not buy a full day (cash or storage)';
     }
   }
   if (!err) toast(`✅ ${a.fix.label}: done at ${Math.max(1, a.restIds.length)} restaurant${a.restIds.length === 1 ? '' : 's'}`, 'good');
