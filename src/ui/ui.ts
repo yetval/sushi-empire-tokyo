@@ -122,7 +122,7 @@ export class UI {
       const top = this.stack[this.stack.length - 1]?.el;
       // prefer the active tab; never an arbitrary button (a stray Enter on ✕ would close the window)
       const tab = top?.querySelector<HTMLElement>('.tab[aria-current], .stab[aria-current]');
-      if (top && !tab && top.tabIndex < 0) top.tabIndex = -1;
+      if (top && !tab && !top.hasAttribute('tabindex')) top.tabIndex = -1; // make the window itself focusable
       (tab ?? top)?.focus({ preventScroll: true });
     }
   }
