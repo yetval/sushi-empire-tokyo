@@ -1,7 +1,7 @@
 // Street props & buildings. All functions draw into a Builder in its current local frame
 // (front faces +z, ground y=0). They add their own colliders.
 import * as THREE from 'three';
-import { Builder, G } from './kit';
+import { Builder, G, proto } from './kit';
 
 export const C = {
   wood: '#6b4330', woodL: '#9a6b47', woodD: '#4a2c1f', red: '#d6452c', redD: '#a8321f', plaster: '#f4ecdc', paper: '#fff3d6',
@@ -197,21 +197,29 @@ export function powerPole(b: Builder, x: number, z: number, transformer = true):
 }
 
 /** Sagging wires between two world points (call outside any pushed frame). */
+/** Wires strung between two world points (call outside any pushed frame) as true catenaries: power lines on the
+ *  cross-arms, then the heavier telecom cable lower down with more sag. */
 export function wires(b: Builder, p: THREE.Vector3, q: THREE.Vector3, n = 3): void {
-  for (let w = 0; w < n; w++) {
-    const off = (w - (n - 1) / 2) * (n > 3 ? 0.42 : 0.55);
+  const dir = q.clone().sub(p); dir.y = 0; dir.normalize();
+  const perp = new THREE.Vector3(-dir.z, 0, dir.x);
+  const span = p.distanceTo(q);
+  // [perpendicular offset, height offset, sag per metre of span, radius]
+  const LINES: [number, number, number, number][] = [[-0.8, 0.4, 0.022, 0.014], [0.8, 0.4, 0.022, 0.014], [0, 0.4, 0.024, 0.014], [-0.6, -0.2, 0.028, 0.016], [0.6, -0.2, 0.028, 0.016], [0.15, -1.5, 0.045, 0.045], [-0.2, -2.0, 0.05, 0.03]];
+  const pick = n > 3 ? LINES.slice(0, n) : n === 1 ? [[0, 0, 0.03, 0.015] as [number, number, number, number]] : LINES.slice(2, 2 + n);
+  const K = 1.4, ck = Math.cosh(K), SEG = 14;
+  for (const [o, dy, sagPm, rad] of pick) {
+    const sag = sagPm * span;
     const pts: THREE.Vector3[] = [];
-    for (let i = 0; i <= 6; i++) {
-      const t = i / 6;
-      pts.push(new THREE.Vector3(p.x + (q.x - p.x) * t + off, p.y + (q.y - p.y) * t - Math.sin(t * Math.PI) * (w === n - 1 && n > 3 ? 1.1 : 0.55 + w * 0.08) + (w % 2) * 0.35 - (w === n - 1 && n > 3 ? 1.3 : 0), p.z + (q.z - p.z) * t));
+    for (let i = 0; i <= SEG; i++) {
+      const t = i / SEG;
+      const f = (Math.cosh(K * (2 * t - 1)) - ck) / (ck - 1); // 0 at the poles, -1 mid-span
+      pts.push(new THREE.Vector3().lerpVectors(p, q, t).addScaledVector(perp, o).add(new THREE.Vector3(0, dy + f * sag, 0)));
     }
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < SEG; i++) {
       const a = pts[i], c = pts[i + 1];
-      const len = a.distanceTo(c);
-      const g = new THREE.CylinderGeometry(w === n - 1 && n > 3 ? 0.05 : 0.016, w === n - 1 && n > 3 ? 0.05 : 0.016, len, 4).rotateX(Math.PI / 2);
-      const m = new THREE.Matrix4().lookAt(a, c, new THREE.Vector3(0, 1, 0)).setPosition(a.clone().add(c).multiplyScalar(0.5));
-      g.applyMatrix4(m);
-      b.add(g, '#25262b');
+      const g = new THREE.CylinderGeometry(rad, rad, a.distanceTo(c) + rad, 4).rotateX(Math.PI / 2);
+      g.applyMatrix4(new THREE.Matrix4().lookAt(a, c, new THREE.Vector3(0, 1, 0)).setPosition(a.clone().add(c).multiplyScalar(0.5)));
+      b.add(g, '#2a2b2f', { vary: 0 });
     }
   }
 }
@@ -226,18 +234,6 @@ export function cone(b: Builder, x: number, z: number): void {
   b.add(G.cone(0.18, 0.6, 10), '#ff7b2e', { at: [x, 0.04, z] });
   b.box(x, 0, z, 0.4, 0.05, 0.4, '#30323a');
   b.box(x, 0.3, z, 0.2, 0.08, 0.2, '#ffffff');
-}
-
-export function trafficLight(b: Builder, x: number, z: number, ry = 0): void {
-  b.push(x, 0, z, ry);
-  b.cyl(0, 0, 0, 0.07, 0.08, 4.6, C.metalD, 8);
-  b.box(0, 4.4, 0.9, 0.08, 0.08, 1.8, C.metalD);
-  b.rbox(0, 4.15, 1.6, 0.3, 0.32, 1.0, '#3a3d44', 0.05);
-  b.add(G.cyl(0.11, 0.11, 0.04, 10), '#46c46e', { at: [0.16, 4.31, 1.3], rot: [0, 0, Math.PI / 2], glow: '#46ff8a' });
-  b.add(G.cyl(0.11, 0.11, 0.04, 10), '#552', { at: [0.16, 4.31, 1.6], rot: [0, 0, Math.PI / 2] });
-  b.add(G.cyl(0.11, 0.11, 0.04, 10), '#522', { at: [0.16, 4.31, 1.9], rot: [0, 0, Math.PI / 2] });
-  b.collide(0, 0, 0.25, 0.25, 4, false);
-  b.pop();
 }
 
 /** Striped awning projecting from a facade: front edge at local z=depth. */
@@ -282,8 +278,8 @@ export const SHOP: Record<ShopKind, ShopDef> = {
   boutique: { kind: 'boutique', names: ['MAISON', 'BIJOUX', 'Atelier', 'Parfum', 'MONTRES', 'Couture', '真珠', 'GALERIE', 'Pâtisserie'], bg: '#2d2d33', fg: '#d8b24a' },
   generic: { kind: 'generic', names: ['洋品店', 'クリーニング', '時計', 'メガネ', '靴'], bg: '#3c4454', fg: '#ffffff' },
 };
-const TENANTS = ['歯科', '英会話', '雀荘', '整体', 'スナック', '税理士', '学習塾', 'ネイル', 'マッサージ', '司法書士', 'ヨガ', '鍼灸', 'BAR', '事務所'];
-const pickOf = <T>(r: () => number, a: readonly T[]): T => a[Math.floor(r() * a.length)];
+export const TENANTS = ['歯科', '英会話', '雀荘', '整体', 'スナック', '税理士', '学習塾', 'ネイル', 'マッサージ', '司法書士', 'ヨガ', '鍼灸', 'BAR', '事務所'];
+export const pickOf = <T>(r: () => number, a: readonly T[]): T => a[Math.floor(r() * a.length)];
 
 export interface BuildingOpts {
   x: number; w: number; d: number; floors: number; style: Style; color: string; r: () => number;
@@ -423,10 +419,10 @@ export function building(b: Builder, o: BuildingOpts): number {
   return h;
 }
 
-function shadeHex(hex: string, f: number): string { return '#' + new THREE.Color(hex).multiplyScalar(f).getHexString(); }
+export function shadeHex(hex: string, f: number): string { return '#' + new THREE.Color(hex).multiplyScalar(f).getHexString(); }
 
 /** Ground-floor shopfront by shop kind: frame, glass, sign band, noren, lanterns, food display, clutter. */
-function groundFloor(b: Builder, o: BuildingOpts, kind: ShopKind, gh: number, wooden: boolean): void {
+export function groundFloor(b: Builder, o: BuildingOpts, kind: ShopKind, gh: number, wooden: boolean): void {
   const { x, w, r } = o;
   const def = SHOP[kind];
   const name = o.shop ?? pickOf(r, def.names);
@@ -471,6 +467,13 @@ function groundFloor(b: Builder, o: BuildingOpts, kind: ShopKind, gh: number, wo
     // sign band
     b.box(x, gh - 0.65, 0.04, w, 0.65, 0.14, wooden ? C.woodD : bg);
     b.sign(x, gh - 0.33, 0.12, Math.min(w - 0.5, 4.6), 0.5, name, { bg: wooden ? C.woodD : bg, fg: wooden ? '#f6e3b4' : fg, sub: o.sub, px: 90 });
+    // A real door leaf breaks up the display frontage on narrow shops.
+    const doorW = Math.min(w * 0.30, 1.31);
+    b.box(doorX, 0.03, 0.092, doorW, 2.31, 0.12, wooden ? '#5f4a37' : '#596168');
+    b.box(doorX, 0.72, 0.155, doorW - 0.16, 1.38, 0.023, wooden ? '#b7a17a' : '#aec4c2', lit);
+    b.box(doorX, 0.065, 0.157, doorW - 0.15, 0.53, 0.031, wooden ? '#85684c' : '#768583');
+    b.box(doorX, 1.39, 0.172, doorW - 0.14, 0.04, 0.031, frame);
+    b.rbox(doorX + doorW * 0.32, 0.95, 0.194, 0.028, 0.20, 0.04, '#b29869', 0.008);
   }
   // eaves: tiled pent roof (wood) or awning
   if (wooden) {
@@ -493,13 +496,30 @@ function groundFloor(b: Builder, o: BuildingOpts, kind: ShopKind, gh: number, wo
 
 /** Glass case of plastic food samples (shokuhin sampuru). */
 function foodDisplay(b: Builder, x: number, z: number, r: () => number, kind: ShopKind): void {
-  b.box(x, 0, z, 1.1, 0.75, 0.45, C.woodD);
-  b.box(x, 0.75, z, 1.1, 0.5, 0.45, '#e6f3fa', '#ffe9c4');
+  const mat = kind === 'kissaten' ? '#554136' : '#735a46';
+  b.rbox(x, 0, z, 1.1, 0.73, 0.45, mat, 0.03);
+  b.box(x, 0.11, z + 0.224, 1.06, 0.16, 0.021, '#82755b');
+  b.box(x, 0.72, z, 1.09, 0.026, 0.45, '#aea496');
+  b.box(x, 1.20, z, 1.11, 0.046, 0.46, mat);
+  for (const dx of [-0.528, 0.528]) for (const dz of [-0.209, 0.209]) b.box(x + dx, 0.737, z + dz, 0.027, 0.47, 0.027, '#817662');
+  b.add(G.box(1.04, 0.442, 0.41), '#d9e8e0', { at: [x, 0.747, z], glass: true });
   for (let i = 0; i < 3; i++) {
     const fx = x - 0.35 + i * 0.35;
-    if (kind === 'kissaten') { b.rbox(fx, 0.8, z, 0.18, 0.12, 0.14, pickOf(r, ['#f4d35e', '#ffffff', '#c97b63']), 0.03); continue; }
-    b.cyl(fx, 0.78, z, 0.13, 0.08, 0.1, pickOf(r, ['#d62828', '#1d1d1d', '#ffffff']), 10);
-    b.cyl(fx, 0.88, z, 0.12, 0.12, 0.015, pickOf(r, ['#f4a259', '#e9c46a', '#8d5524', '#f1faee']), 10);
+    if (kind === 'kissaten') {
+      const cake = pickOf(r, ['#e5c180', '#eee3c8', '#b87961']);
+      b.cyl(fx, 0.751, z, 0.108, 0.087, 0.014, '#d5d1bb', 14);
+      b.rbox(fx, 0.769, z, 0.142, 0.081, 0.122, cake, 0.018);
+      b.box(fx, 0.812, z + 0.064, 0.122, 0.015, 0.014, '#e4cfab');
+      b.sphere(fx + 0.013, 0.856, z + 0.008, 0.017, '#a85043');
+    } else {
+      const glaze = pickOf(r, ['#a75143', '#4b5452', '#d6c8ac']);
+      const broth = pickOf(r, ['#bc9357', '#c4a171', '#986c48', '#daaa55']);
+      b.cyl(fx, 0.75, z, 0.121, 0.058, 0.096, glaze, 14);
+      b.cyl(fx, 0.839, z, 0.102, 0.091, 0.008, broth, 14);
+      b.add(G.sphere(0.034), '#e2d09e', { at: [fx + 0.036, 0.851, z - 0.014], scale: [1, 0.19, 0.69] });
+      b.add(G.sphere(0.014), '#c9a251', { at: [fx + 0.037, 0.860, z - 0.012], scale: [1, 0.23, 0.89] });
+      for (const dx of [-0.034, -0.014, 0.009]) b.sphere(fx + dx, 0.848, z + 0.033, 0.010, '#75915d');
+    }
   }
   b.collide(x, z, 1.1, 0.45, 1.25, false);
 }
@@ -575,41 +595,6 @@ export function skyline(b: Builder, x0: number, x1: number, z: number, r: () => 
   }
 }
 
-/** Car body geometry builder (front faces local +x). */
-export function car(b: Builder, kind: 'sedan' | 'taxi' | 'van' | 'bus' | 'kei' | 'scooter', color: string): void {
-  if (kind === 'scooter') {
-    for (const dx of [-0.5, 0.5]) b.add(new THREE.TorusGeometry(0.2, 0.08, 6, 12), C.black, { at: [dx, 0.24, 0] });
-    b.rbox(-0.2, 0.3, 0, 0.8, 0.4, 0.42, color, 0.15);
-    b.rbox(0.45, 0.25, 0, 0.18, 0.75, 0.3, color, 0.08);
-    b.rbox(-0.6, 0.8, 0, 0.36, 0.32, 0.36, '#ffffff', 0.05);
-    b.rbox(-0.1, 0.65, 0, 0.3, 0.6, 0.3, '#3d405b', 0.1); // rider body
-    b.sphere(-0.1, 1.45, 0, 0.2, '#e63946'); // helmet
-    b.add(G.sphere(0.07), '#fff', { at: [0.56, 0.9, 0], glow: '#fff3c4' });
-    return;
-  }
-  const L = kind === 'bus' ? 9 : kind === 'van' ? 4.4 : kind === 'kei' ? 3.3 : 4.3;
-  const W = kind === 'bus' ? 2.4 : kind === 'kei' ? 1.5 : 1.75;
-  const H = kind === 'bus' ? 2.8 : kind === 'van' ? 1.9 : kind === 'kei' ? 1.7 : 1.4;
-  const wheelR = kind === 'bus' ? 0.5 : 0.34;
-  for (const dx of [-L / 2 + wheelR + 0.35, L / 2 - wheelR - 0.35]) for (const dz of [-W / 2 + 0.1, W / 2 - 0.1])
-    b.add(G.cyl(wheelR, wheelR, 0.25, 12), '#24252a', { at: [dx, wheelR, dz], rot: [Math.PI / 2, 0, 0] });
-  if (kind === 'sedan' || kind === 'taxi') {
-    b.rbox(0, 0.3, 0, L, 0.65, W, color, 0.22);
-    b.rbox(-0.25, 0.85, 0, L * 0.55, 0.62, W - 0.12, color, 0.2);
-    b.rbox(-0.25, 0.9, 0, L * 0.55 + 0.04, 0.45, W - 0.05, '#9ec5dd', 0.12, '#26333f');
-    if (kind === 'taxi') { b.rbox(-0.2, 1.47, 0, 0.5, 0.22, 0.25, '#ffd23f', 0.05, '#ffcc33'); b.box(0, 0.6, 0, L + 0.02, 0.08, W + 0.02, '#ffd23f'); }
-  } else {
-    b.rbox(0, 0.3, 0, L, H - 0.3, W, color, kind === 'bus' ? 0.25 : 0.2);
-    const wl = kind === 'bus' ? L - 1 : L * 0.45;
-    b.rbox(kind === 'bus' ? 0 : L * 0.2, H * 0.55, 0, wl, H * 0.3, W + 0.03, '#9ec5dd', 0.08, '#26333f');
-    if (kind === 'bus') b.box(0, 0.5, 0, L + 0.02, 0.35, W + 0.02, '#2a9d8f');
-  }
-  b.add(G.box(0.05, 0.16, 0.3), '#ffffff', { at: [L / 2 + 0.01, 0.55, W / 2 - 0.28], glow: '#fff6d0' });
-  b.add(G.box(0.05, 0.16, 0.3), '#ffffff', { at: [L / 2 + 0.01, 0.55, -W / 2 + 0.28], glow: '#fff6d0' });
-  b.add(G.box(0.05, 0.14, 0.3), '#d62828', { at: [-L / 2 - 0.01, 0.6, W / 2 - 0.25], glow: '#ff2a2a' });
-  b.add(G.box(0.05, 0.14, 0.3), '#d62828', { at: [-L / 2 - 0.01, 0.6, -W / 2 + 0.25], glow: '#ff2a2a' });
-}
-
 /** A cluster of vending machines with recycling bins — a fixture of every Tokyo corner. */
 export function vendingCluster(b: Builder, x: number, z: number, ry: number, n: number, r: () => number): void {
   b.push(x, 0, z, ry);
@@ -665,7 +650,8 @@ export function farField(b: Builder, skip: { x0: number; x1: number; z0: number;
     const wood = style === 'wood' && r() < 0.8;
     const h = wood ? 5 + r() * 6 : style === 'wood' ? 10 + r() * 14 : style === 'lux' ? 12 + r() * 22 : 14 + r() * (30 + far * 55);
     const col = wood ? pickOf(r, ['#d8c8aa', '#cdb995', '#e3d6bd', '#b9a684']) : pickOf(r, ['#a9b2bd', '#c4c9cf', '#8e98a5', '#d2cbc0', '#b7aea2', '#7d8a99']);
-    b.box(x, 0, z, w, h, d, col);
+    b.add(G.bbox(w, h, d, 0.12), col, { at: [x, 0, z] });
+    if (!wood) b.add(G.bbox(w + 0.2, 0.3, d + 0.2, 0.06), shadeHex(col, 1.08), { at: [x, h, z] }); // coping line reads at distance
     // lit windows on the two faces looking toward the play area
     const fx = -Math.sign(x), fz = -Math.sign(z);
     for (let f = 0; f * 3.4 + 2.2 < h - 1; f++) {
@@ -695,4 +681,119 @@ export function broadcastTower(b: Builder, x: number, z: number, H = 150): void 
   b.add(G.cyl(1.6, 2.2, H * 0.3, 10), '#e9eef3', { at: [x, H * 0.62, z] });
   b.add(G.cyl(0.25, 0.6, H * 0.12, 6), '#dfe6ee', { at: [x, H * 0.92, z] });
   b.add(G.sphere(0.6, 6, 4), '#ff3b3b', { at: [x, H * 1.04, z], glow: '#ff2020' });
+}
+
+// ---------------------------------------------------------------- street furniture (instanced where repeated)
+const PP = {
+  bollard: () => proto('bollard', (b) => {
+    b.add(G.cyl(0.07, 0.08, 0.82, 12), '#ffffff', { at: [0, 0, 0] });
+    b.add(G.sphere(0.07, 12, 6), '#ffffff', { at: [0, 0.82, 0], scale: [1, 0.5, 1] });
+    b.add(G.cyl(0.075, 0.075, 0.07, 12), '#e8b923', { at: [0, 0.62, 0], glow: '#ffd23f' });
+    b.add(G.cyl(0.11, 0.11, 0.03, 12), '#6b7076', { at: [0, 0, 0] });
+  }, { shadow: true, tint: 'body' }),
+  bike: () => proto('bicycle', (b) => {
+    for (const dx of [-0.5, 0.5]) { b.add(new THREE.TorusGeometry(0.31, 0.03, 6, 18), '#26272b', { at: [dx, 0.33, 0] }); b.add(G.cyl(0.04, 0.04, 0.06, 8), '#9aa0a6', { at: [dx, 0.33, -0.03], rot: [Math.PI / 2, 0, 0] }); }
+    b.add(G.cyl(0.022, 0.022, 0.62, 6), '#ffffff', { at: [-0.25, 0.33, 0], rot: [0, 0, -0.95] }); // seat tube stays
+    b.add(G.cyl(0.022, 0.022, 0.62, 6), '#ffffff', { at: [0.02, 0.36, 0], rot: [0, 0, -1.45] }); // down tube (step-through mamachari)
+    b.add(G.cyl(0.022, 0.022, 0.55, 6), '#ffffff', { at: [-0.18, 0.36, 0], rot: [0, 0, 0.22] });
+    b.add(G.cyl(0.022, 0.022, 0.62, 6), '#ffffff', { at: [0.5, 0.33, 0], rot: [0, 0, 0.3] }); // fork + stem
+    b.add(G.bbox(0.24, 0.06, 0.12, 0.02), '#26272b', { at: [-0.27, 0.88, 0] });
+    b.box(0.32, 0.96, 0, 0.03, 0.03, 0.56, '#9aa0a6');
+    b.add(G.bbox(0.3, 0.22, 0.34, 0.02), '#b9bec3', { at: [0.62, 0.62, 0] }); // basket
+    b.box(-0.5, 0.66, 0, 0.32, 0.02, 0.16, '#9aa0a6'); // rear carrier
+    b.add(G.bbox(0.07, 0.07, 0.06, 0.015), '#fff6d8', { at: [0.53, 0.78, 0], glow: '#ffffff' });
+  }, { shadow: true, tint: 'body' }),
+  railPost: () => proto('guardrail-post', (b) => {
+    b.add(G.cyl(0.045, 0.045, 0.85, 8), '#ffffff', { at: [0, 0, 0] });
+    b.add(G.sphere(0.05, 8, 4), '#ffffff', { at: [0, 0.85, 0], scale: [1, 0.5, 1] });
+  }, { shadow: true, tint: 'body' }),
+};
+const BIKE_COLS = ['#d9dcdf', '#3e5f8a', '#a33b3b', '#e4ddcf', '#2f4f46', '#c9a227', '#6b6f75', '#efe9df'];
+
+/** Bicycle rack against a wall or kerb: a low rail along local x with bikes parked nose-in (bikes face local +z). */
+export function bikeRack(b: Builder, x: number, z: number, n: number, ry = 0, r: () => number = Math.random): void {
+  b.push(x, 0, z, ry);
+  const L = n * 0.62;
+  b.add(G.bbox(L + 0.3, 0.05, 0.12, 0.015), '#8d9298', { at: [0, 0.3, 0.1] });
+  for (const sx of [-1, 1]) b.box(sx * (L / 2 + 0.1), 0, 0.1, 0.05, 0.32, 0.05, '#8d9298');
+  b.box(0, 0.002, 0.45, L + 0.6, 0.006, 1.9, '#c9c5bc');
+  for (let i = 0; i < n; i++) {
+    if (r() < 0.18) continue;
+    b.inst(PP.bike(), -L / 2 + 0.31 + i * 0.62, 0, 0.55 + (r() - 0.5) * 0.12, { ry: Math.PI / 2 + (r() - 0.5) * 0.12, color: pickOf(r, BIKE_COLS) });
+  }
+  b.collide(0, 0.55, L + 0.4, 1.9, 1.0, false);
+  b.pop();
+}
+
+/** Bollards along local x (instanced). */
+export function bollards(b: Builder, x0: number, x1: number, z: number, step = 1.2): void {
+  for (let x = x0; x <= x1 + 1e-3; x += step) { b.inst(PP.bollard(), x, 0, z, { color: '#4d5157' }); b.collide(x, z, 0.18, 0.18, 0.85, false); }
+}
+
+/** White steel guard rail along local x from x0 to x1 at z: posts every 2 m, two pipe rails (visual only, no collider). */
+export function guardRail(b: Builder, x0: number, x1: number, z: number): void {
+  const L = x1 - x0;
+  if (L < 1) return;
+  for (let x = x0; x <= x1 + 1e-3; x += 2) b.inst(PP.railPost(), x, 0, z, { color: '#eef0f0' });
+  for (const y of [0.42, 0.78]) b.add(G.cyl(0.03, 0.03, L, 8), '#eef0f0', { at: [x0, y, z], rot: [0, 0, -Math.PI / 2], vary: 0 });
+}
+
+/** Street sign on a pole: round regulatory disc (atlas-painted) plus an optional blue street-name plate. */
+export function streetSign(b: Builder, x: number, z: number, ry: number, kind: 'noParking' | 'crossing' | 'oneWay' | 'slow', plate?: string): void {
+  if (!b.atlas) return;
+  const at = b.atlas as unknown as Record<string, [number, number, number, number]>;
+  const key = 'rs-' + kind;
+  at[key] ??= b.atlas.custom(128, 128, (c, x0, y0) => {
+    const cx = x0 + 64, cy = y0 + 64;
+    c.fillStyle = '#e9ecef'; c.fillRect(x0, y0, 128, 128);
+    if (kind === 'crossing') {
+      c.fillStyle = '#1f5fbf'; c.fillRect(x0 + 6, y0 + 6, 116, 116);
+      c.fillStyle = '#ffffff'; c.beginPath(); c.moveTo(cx, y0 + 18); c.lineTo(x0 + 112, y0 + 104); c.lineTo(x0 + 16, y0 + 104); c.closePath(); c.fill();
+      c.fillStyle = '#1d1d1d'; c.beginPath(); c.arc(cx + 2, y0 + 50, 7, 0, 7); c.fill(); c.fillRect(cx - 4, y0 + 58, 9, 22); c.fillRect(cx - 14, y0 + 92, 30, 4);
+      for (let i = 0; i < 4; i++) c.fillRect(x0 + 34 + i * 16, y0 + 96, 9, 4);
+      return;
+    }
+    if (kind === 'slow') {
+      c.fillStyle = '#ffffff'; c.beginPath(); c.moveTo(x0 + 6, y0 + 14); c.lineTo(x0 + 122, y0 + 14); c.lineTo(cx, y0 + 122); c.closePath(); c.fill();
+      c.strokeStyle = '#d62828'; c.lineWidth = 10; c.stroke();
+      c.fillStyle = '#1f5fbf'; c.font = '700 26px sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('徐行', cx, y0 + 48);
+      return;
+    }
+    c.fillStyle = kind === 'oneWay' ? '#1f5fbf' : '#1f5fbf'; c.beginPath(); c.arc(cx, cy, 60, 0, 7); c.fill();
+    if (kind === 'noParking') { c.strokeStyle = '#d62828'; c.lineWidth = 12; c.beginPath(); c.arc(cx, cy, 54, 0, 7); c.stroke(); c.beginPath(); c.moveTo(cx - 38, cy - 38); c.lineTo(cx + 38, cy + 38); c.stroke(); }
+    else { c.fillStyle = '#ffffff'; c.fillRect(cx - 34, cy - 8, 50, 16); c.beginPath(); c.moveTo(cx + 40, cy); c.lineTo(cx + 12, cy - 24); c.lineTo(cx + 12, cy + 24); c.closePath(); c.fill(); }
+  });
+  b.push(x, 0, z, ry);
+  b.add(G.cyl(0.035, 0.04, 2.9, 8), '#b9bec3', { at: [0, 0, 0] });
+  b.add(G.cyl(0.3, 0.3, 0.02, 20), '#9aa0a6', { at: [0, 2.6, -0.02], rot: [Math.PI / 2, 0, 0] });
+  b.panel(0, 2.6, 0.0, 0.58, 0.58, at[key]);
+  if (plate) {
+    b.box(0, 1.95, 0.0, 0.9, 0.3, 0.02, '#1f4f99');
+    b.sign(0, 2.1, 0.015, 0.86, 0.26, plate, { bg: '#1f4f99', fg: '#ffffff', px: 120 });
+  }
+  b.collide(0, 0, 0.12, 0.12, 2.9, false);
+  b.pop();
+}
+
+/** Bus stop: slim shelter with a glass roof, bench, lit advert panel and the round timetable sign. Faces local +z (the road). */
+export function busStop(b: Builder, x: number, z: number, ry: number, name: string): void {
+  b.push(x, 0, z, ry);
+  for (const sx of [-1.6, 1.6]) b.add(G.bbox(0.1, 2.5, 0.1, 0.02), '#5c6168', { at: [sx, 0, -0.55] });
+  b.add(G.bbox(3.6, 0.08, 1.5, 0.02), '#5c6168', { at: [0, 2.5, -0.2] });
+  b.add(G.box(3.4, 0.03, 1.36), '#cfe0ea', { at: [0, 2.585, -0.2], glass: true });
+  b.add(G.box(3.2, 1.9, 0.03), '#d9e6ee', { at: [0, 0.35, -0.6], glass: true });
+  b.add(G.bbox(2.2, 0.06, 0.4, 0.02), '#b08a63', { at: [-0.4, 0.45, -0.35] });
+  for (const sx of [-1.3, 0.5]) b.box(sx, 0, -0.35, 0.05, 0.45, 0.3, '#5c6168');
+  b.add(G.bbox(1.0, 1.7, 0.16, 0.03), '#3b3e44', { at: [1.15, 0.3, -0.62] });
+  b.box(1.15, 0.38, -0.53, 0.86, 1.54, 0.02, '#f1ece2', '#e8eef8');
+  b.sign(1.15, 1.15, -0.515, 0.8, 1.4, name, { bg: '#f1ece2', fg: '#2f4858', px: 64, sub: 'BUS' });
+  b.collide(0, -0.45, 3.4, 0.4, 2.5, false);
+  b.pop();
+  b.push(x, 0, z, ry);
+  b.add(G.cyl(0.04, 0.05, 2.4, 8), '#b9bec3', { at: [-2.2, 0, 0.1] });
+  b.add(G.cyl(0.28, 0.28, 0.06, 20), '#1f5fbf', { at: [-2.2, 2.3, 0.1], rot: [Math.PI / 2, 0, 0] });
+  b.sign(-2.2, 2.3, 0.14, 0.42, 0.24, 'バス', { bg: '#1f5fbf', fg: '#ffffff', px: 120 });
+  b.box(-2.2, 1.2, 0.08, 0.36, 0.6, 0.06, '#e9ecef');
+  b.collide(-2.2, 0.1, 0.15, 0.15, 2.4, false);
+  b.pop();
 }

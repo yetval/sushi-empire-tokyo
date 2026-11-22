@@ -1,22 +1,23 @@
-// Restaurant altitude: a side sheet for one location (overview, staff, menu & price, house rules, books, format,
+// Restaurant altitude: a side sheet for one location (overview, staff, menu & price, books, format,
 // upgrades & look) plus the shared format (concept) cards used by the buy-lot dialog.
 import { audio } from '../audio/audio';
 import * as A from '../core/actions';
 import { unlockedCosmetics } from '../core/achievements';
 import {
-  AREAS, CONCEPTS, CONCEPT_IDS, ConceptId, MAX_SKILL, PROPERTIES, RECIPES, RESEARCH, ROLES, Role, UPGRADES, recipeCost, trainCost,
+  AREAS, CONCEPTS, CONCEPT_IDS, ConceptId, MAX_SKILL, PROPERTIES, RECIPES, RESEARCH, ROLES, Role, UPGRADES, milestone, recipeCost, trainCost,
 } from '../core/data';
 import * as E from '../core/empire';
 import { exact, short, yen, yenExact } from '../core/format';
 import { averageStars } from '../core/reviews';
-import { SEASONAL_RECIPES, season, seasonalRecipes } from '../core/seasons';
 import * as sim from '../core/sim';
 import { GameState, RestDay } from '../core/state';
-import { bar, delegate, el, esc, fail, ingIcon, patch, pips, run, stars } from './dom';
+import { delegate, el, esc, fail, healthSeal, ingIcon, patch, pips, run, stars } from './dom';
 import { UIHost } from './host';
+import { coinBurst, punch } from './fx';
+import { icon } from './icons';
 
 // ---------------------------------------------------------------- shared: formats
-export const CONCEPT_INK: Record<ConceptId, string> = { stand: '#b82d25', kiosk: '#a8741c', bar: '#23385c', kaiten: '#46702f', omakase: '#1f1b17', ghost: '#5a3f7a' };
+export const CONCEPT_INK: Record<ConceptId, string> = { stand: '#b82d25', kiosk: '#8f6a1f', bar: '#7b4d2c', kaiten: '#46702f', omakase: '#1f1b17', ghost: '#5b5047' };
 const KANJI: Record<ConceptId, string> = { stand: '屋', kiosk: '持', bar: '寿', kaiten: '回', omakase: '任', ghost: '配' };
 
 /** Plain-language trade-offs, derived from the numbers (the Sushi Bar is the 1.0 baseline). */
@@ -25,22 +26,18 @@ export function conceptTraits(c: (typeof CONCEPTS)[ConceptId]): { pro: string[];
   const pct = (v: number) => `${v > 1 ? '+' : '−'}${Math.round(Math.abs(v - 1) * 100)}%`;
   if (c.traffic > 1.05) pro.push(`${pct(c.traffic)} guests`); else if (c.traffic < 0.95) con.push(`${pct(c.traffic)} guests`);
   if (c.price > 1.05) pro.push(`Bills ×${c.price}`); else if (c.price < 0.95) con.push(`Bills ×${c.price}`);
-  if (c.elasticity < 0.9) pro.push('Guests shrug at prices'); else if (c.elasticity > 1.1) con.push('Price-sensitive guests');
-  if (c.cook > 1.05) pro.push(`${pct(c.cook)} kitchen speed`); else if (c.cook < 0.95) con.push(`${pct(c.cook)} kitchen speed`);
-  if (c.quality > 0.01) pro.push(`+${Math.round(c.quality * 100)} quality`); else if (c.quality < -0.01) con.push(`${Math.round(c.quality * 100)} quality`);
+  if (c.elasticity < 0.9) pro.push('Price-proof guests'); else if (c.elasticity > 1.1) con.push('Price-sensitive');
+  if (c.cook > 1.05) pro.push(`${pct(c.cook)} kitchen`); else if (c.cook < 0.95) con.push(`${pct(c.cook)} kitchen`);
+  if (c.quality > 0.01) pro.push(`+${Math.round(c.quality * 100)} quality`); else if (c.quality < -0.01) con.push(`−${Math.round(-c.quality * 100)} quality`);
   if (c.rent < 0.95) pro.push(`Rent ${pct(c.rent)}`); else if (c.rent > 1.05) con.push(`Rent ${pct(c.rent)}`);
   if (c.staff > 1.05) pro.push(`Chef slots ×${c.staff}`); else if (c.staff < 0.95) con.push(`Chef slots ×${c.staff}`);
-  if (!c.needsServer) pro.push('No servers needed');
-  if (!c.walkIn) con.push('Delivery only: no walk-ins');
+  if (!c.needsServer) pro.push('No servers');
+  if (!c.walkIn) con.push('Delivery only');
   return { pro, con };
 }
 
-const meter = (label: string, v: number, lo: number, hi: number, invert = false) => {
-  const f = Math.max(0.06, Math.min(1, (v - lo) / (hi - lo)));
-  return `<div class="cm"><span>${label}</span><i><b style="width:${(invert ? 1.06 - f : f) * 100}%"></b></i></div>`;
-};
-
-/** Format cards. mode 'buy' shows lot price + fit-out; 'switch' shows fit-out only and marks the current format. */
+/** Format cards. mode 'buy' shows lot price + fit-out; 'switch' shows the refit cost and stamps the current format.
+ *  The head is a 3-cell grid (seal · name · stamp), so the 現 stamp can never sit on the name. */
 export function conceptCards(s: GameState, propId: string, selected: ConceptId | null, mode: 'buy' | 'switch'): string {
   const lot = PROPERTIES[propId];
   const current = s.restaurants[propId]?.concept;
@@ -50,16 +47,16 @@ export function conceptCards(s: GameState, propId: string, selected: ConceptId |
     const fit = A.fitoutCost(propId, id);
     const total = (mode === 'buy' ? lot.price : 0) + fit;
     const { pro, con } = conceptTraits(c);
-    const isCur = mode === 'switch' && current === id;
-    const fitsLot = (lot.kind === 'stand') === (id === 'stand');
-    if (!fitsLot) return '';
-    return `<button class="concept ${selected === id ? 'sel' : ''} ${why ? 'locked' : ''} ${isCur ? 'cur' : ''}" style="--ink:${CONCEPT_INK[id]}" data-act="pickc" data-arg="${id}" aria-pressed="${selected === id}" ${why && !isCur ? 'aria-disabled="true"' : ''}>
-      <span class="c-seal" aria-hidden="true">${KANJI[id]}</span>
-      <span class="c-name"><b>${c.name}</b><small>${c.jp}</small></span>
-      <span class="c-desc">${esc(c.desc)}</span>
-      <span class="c-meters">${meter('Guests', c.traffic, 0.3, 1.8)}${meter('Price level', c.price, 0.6, 2.7)}${meter('Kitchen', c.cook, 0.6, 1.5)}${meter('Quality', c.quality, -0.1, 0.14)}${meter('Rent', c.rent, 0.4, 1.3, true)}${meter('Chef slots', c.staff, 0.6, 1.6)}</span>
-      <span class="c-traits">${pro.map((p) => `<i class="pro">${p}</i>`).join('')}${con.map((p) => `<i class="con">${p}</i>`).join('')}</span>
-      <span class="c-cost">${isCur ? '<em>Current format</em>' : why ? `<em class="lock">${esc(why)}</em>` : `<b>${yen(total)}</b>${mode === 'buy' && fit ? `<small>lot ${yen(lot.price)} + fit-out ${yen(fit)}</small>` : mode === 'buy' ? '<small>no fit-out</small>' : '<small>fit-out</small>'}`}</span>
+    const isCur = mode === 'switch' && current === id, sel = selected === id;
+    const mark = isCur ? '<span class="c-stamp" title="Current format">現</span>' : sel ? `<span class="c-tick">${icon('check', 16)}</span>` : '';
+    const chips = pro.map((p) => `<i class="chip pro">${p}</i>`).join('') + con.map((p) => `<i class="chip con">${p}</i>`).join('');
+    const cost = isCur ? `<em class="here">${icon('home', 16)} Running here now</em>`
+      : why ? `<em class="lock">${icon('lock', 16)} ${esc(why)}</em>`
+      : `<b class="num ink">${yen(total)}</b><small>${mode === 'buy' ? (fit ? `lot ${yen(lot.price)} + fit-out ${yen(fit)}` : 'lot only, no fit-out') : 'refit cost'}</small>`;
+    return `<button class="concept ${sel ? 'sel' : ''} ${why ? 'locked' : ''} ${isCur ? 'cur' : ''}" style="--ink:${CONCEPT_INK[id]}" title="${esc(c.desc)}" data-act="pickc" data-arg="${id}" aria-pressed="${sel}" ${why && !isCur ? 'aria-disabled="true"' : ''}>
+      <span class="c-head"><span class="c-seal" aria-hidden="true">${KANJI[id]}</span><span class="c-name"><b>${c.name}</b><small>${c.jp}</small></span>${mark}</span>
+      <span class="c-traits">${chips || '<i class="chip base">Balanced: no big pluses or minuses</i>'}</span>
+      <span class="c-cost">${cost}</span>
     </button>`;
   }).join('');
 }
@@ -87,20 +84,20 @@ function pnlChart(days: { rev: number; cost: number }[], h = 120, labels: string
   const lo = Math.min(0, ...prof), hi = mx, y = (v: number) => pad + (h - 26) * (1 - (v - lo) / (hi - lo || 1));
   const bars = days.map((d, i) => {
     const x = pad + i * bw;
-    return `<rect x="${(x + bw * 0.12).toFixed(1)}" y="${y(d.rev).toFixed(1)}" width="${(bw * 0.36).toFixed(1)}" height="${Math.max(0, y(0) - y(d.rev)).toFixed(1)}" fill="#23385c"/>
-      <rect x="${(x + bw * 0.5).toFixed(1)}" y="${y(d.cost).toFixed(1)}" width="${(bw * 0.36).toFixed(1)}" height="${Math.max(0, y(0) - y(d.cost)).toFixed(1)}" fill="#b82d25"/>
+    return `<rect x="${(x + bw * 0.12).toFixed(1)}" y="${y(d.rev).toFixed(1)}" width="${(bw * 0.36).toFixed(1)}" height="${Math.max(0, y(0) - y(d.rev)).toFixed(1)}" fill="#4d7d33" stroke="#1f1b17" stroke-width="2"/>
+      <rect x="${(x + bw * 0.5).toFixed(1)}" y="${y(d.cost).toFixed(1)}" width="${(bw * 0.36).toFixed(1)}" height="${Math.max(0, y(0) - y(d.cost)).toFixed(1)}" fill="#ea9a8f" stroke="#1f1b17" stroke-width="2"/>
       ${labels[i] ? `<text x="${(x + bw / 2).toFixed(1)}" y="${h - 4}" text-anchor="middle" font-size="12" fill="#5b5047">${labels[i]}</text>` : ''}`;
   }).join('');
   const line = prof.map((p, i) => `${(pad + i * bw + bw / 2).toFixed(1)},${y(p).toFixed(1)}`).join(' ');
   return `<svg class="pnl" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Revenue, cost and profit for ${n} days">
     <line x1="0" x2="${w}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}" stroke="#1f1b17" stroke-width="1"/>${bars}
-    <polyline points="${line}" fill="none" stroke="#c99a3c" stroke-width="3" stroke-linejoin="round"/></svg>`;
+    <polyline points="${line}" fill="none" stroke="#fcf7ec" stroke-width="7" stroke-linejoin="round" stroke-linecap="round"/><polyline points="${line}" fill="none" stroke="#8f6a1f" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
 }
 
 // ---------------------------------------------------------------- the sheet
-export type SheetTab = 'overview' | 'staff' | 'menu' | 'rules' | 'books' | 'format' | 'look';
+export type SheetTab = 'overview' | 'staff' | 'menu' | 'books' | 'format' | 'look';
 const TABS: [SheetTab, string, string][] = [
-  ['overview', '概', 'Overview'], ['staff', '人', 'Staff'], ['menu', '品', 'Menu & price'], ['rules', '掟', 'House rules'],
+  ['overview', '概', 'Overview'], ['staff', '人', 'Staff'], ['menu', '品', 'Menu & price'],
   ['books', '帳', 'Books'], ['format', '業', 'Format'], ['look', '改', 'Upgrades & look'],
 ];
 const THEMES = ['Classic Wood', 'Sakura Pink', 'Midnight Neon', 'Imperial Gold'];
@@ -116,7 +113,8 @@ const COSMETICS: Record<string, { name: string; apply?: { signColor?: string; th
   uniform_black: { name: 'Black uniforms', apply: { uniform: '#1f1b17' }, swatch: '#1f1b17' },
   apron_indigo: { name: 'Indigo aprons', apply: { uniform: '#23385c' }, swatch: '#23385c' },
 };
-const ROLE_LIST: Role[] = ['chef', 'server', 'cleaner', 'manager'];
+const ROLE_LIST: Role[] = ['chef', 'server', 'manager'];
+const HEALTH_LABEL = { good: 'Healthy', warn: 'Needs a look', bad: 'In trouble' } as const;
 
 export class Sheet {
   el: HTMLElement;
@@ -135,16 +133,29 @@ export class Sheet {
     this.id = id;
     this.el = el('div', 'modal sheet-wrap');
     this.el.innerHTML = `<aside class="panel sheet"><header class="sheet-head"></header>
-      <nav class="sheet-tabs" aria-label="Restaurant sections">${TABS.map(([t, k, n]) => `<button class="stab" data-tab="${t}"><b aria-hidden="true">${k}</b>${n}</button>`).join('')}</nav>
+      <nav class="sheet-tabs" aria-label="Restaurant sections"><i class="stab-ink" aria-hidden="true"></i>${TABS.map(([t, k, n]) => `<button class="stab" data-tab="${t}"><b aria-hidden="true">${k}</b>${n}</button>`).join('')}</nav>
       <div class="sheet-body" tabindex="0"><div class="sh-content"></div></div></aside>`;
     this.body = this.el.querySelector('.sh-content')!;
     this.el.addEventListener('pointerdown', (e) => { if (e.target === this.el) close(); });
-    this.el.querySelector('.sheet-tabs')!.addEventListener('click', (e) => {
+    const nav = this.el.querySelector<HTMLElement>('.sheet-tabs')!;
+    nav.addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-tab]');
       if (b) { audio.sfx('click'); this.show(b.dataset.tab as SheetTab); }
     });
+    // the sliding paper key follows the active tab; re-placed whenever a tab's size changes (fonts load, sheet attaches)
+    const ro = new ResizeObserver(() => this.placeInk());
+    nav.querySelectorAll('.stab').forEach((b) => ro.observe(b));
     this.wire();
     this.show('overview');
+  }
+
+  private placeInk(): void {
+    const nav = this.el.querySelector<HTMLElement>('.sheet-tabs')!, on = nav.querySelector<HTMLElement>('.stab.on');
+    const ink = nav.querySelector<HTMLElement>('.stab-ink')!;
+    if (!on || !on.offsetWidth) return;
+    ink.style.transform = `translateX(${on.offsetLeft}px)`;
+    ink.style.width = `${on.offsetWidth}px`;
+    if (!nav.classList.contains('ink-ready')) requestAnimationFrame(() => nav.classList.add('ink-ready')); // no slide on first placement
   }
 
   private get s() { return this.host.s; }
@@ -160,8 +171,11 @@ export class Sheet {
       if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
     });
     this.st.last = undefined;
+    this.confirmFire = null;
     (this.el.querySelector('.sheet-body') as HTMLElement).scrollTop = 0;
     this.render();
+    this.placeInk();
+    this.body.classList.remove('slide-in'); void this.body.offsetWidth; this.body.classList.add('slide-in');
   }
 
   update(dt: number): void {
@@ -177,13 +191,16 @@ export class Sheet {
     const p = PROPERTIES[this.id], a = AREAS[p.district], c = CONCEPTS[r.concept];
     const ids = Object.keys(s.restaurants);
     const i = ids.indexOf(this.id);
-    const auto = sim.isAutomated(s, this.id);
-    patch(this.el.querySelector('.sheet-head') as HTMLElement, `
-      <span class="big-seal" style="--ink:${CONCEPT_INK[r.concept]}" aria-hidden="true">${KANJI[r.concept]}</span>
-      <div class="sh-title"><h2 id="sheet-title" title="${esc(r.name)}">${esc(r.name)}</h2><div>${a.jp} ${esc(a.name)} · ${c.name} ${c.jp} · ${p.kind}</div></div>
-      <span class="sh-status ${auto ? 'ok' : 'no'}">${auto ? '自動 · runs itself' : '手 · needs crew'}</span>
-      <div class="sh-nav">${ids.length > 1 ? `<button class="sq" data-act="prev" data-arg="p" data-nav="${ids[(i - 1 + ids.length) % ids.length]}" aria-label="Previous restaurant">‹</button><span class="tiny">${i + 1}/${ids.length}</span><button class="sq" data-act="next" data-arg="n" data-nav="${ids[(i + 1) % ids.length]}" aria-label="Next restaurant">›</button>` : ''}
-      <button class="x" data-act="close" data-arg="x" aria-label="Close">✕</button></div>`, this.headSt);
+    const auto = sim.isAutomated(s, this.id), k = this.kpi();
+    const head = this.el.querySelector('.sheet-head') as HTMLElement;
+    head.style.setProperty('--fmt', CONCEPT_INK[r.concept]);
+    const hl = HEALTH_LABEL[k.health];
+    patch(head, `
+      <span class="big-seal" aria-hidden="true">${KANJI[r.concept]}</span>
+      <div class="sh-title"><h2 id="sheet-title" title="${esc(r.name)}">${esc(r.name)}</h2><div><span class="sh-fmt">${c.name} ${c.jp}</span> ${a.jp} ${esc(a.name)} · ${p.kind}</div></div>
+      <div class="sh-badges"><span class="sh-health ${k.health}">${healthSeal(k.health)}<b>${hl}</b></span><span class="sh-status ${auto ? 'ok' : 'no'}">${auto ? '自動 · runs itself' : '手 · needs crew'}</span></div>
+      <div class="sh-nav">${ids.length > 1 ? `<button class="sq" data-act="prev" data-arg="p" data-nav="${ids[(i - 1 + ids.length) % ids.length]}" aria-label="Previous restaurant">‹</button><span class="sh-count">${i + 1}<small>/${ids.length}</small></span><button class="sq" data-act="next" data-arg="n" data-nav="${ids[(i + 1) % ids.length]}" aria-label="Next restaurant">›</button>` : ''}
+      <button class="x" data-act="close" data-arg="x" aria-label="Close">${icon('close')}</button></div>`, this.headSt);
     const html = (this as any)['r_' + this.tab]() as string;
     patch(this.body, html, this.st);
   }
@@ -206,24 +223,38 @@ export class Sheet {
         const f = a && this.localFix(a);
         if (!f) return after();
         if (s().cash < f.cost) return fail(b, `Need ${yen(f.cost)}`);
-        if (run(b, f.apply(), 'coin')) after();
+        const j = this.juice(b, f.cost ? 12 : 0);
+        if (run(b, f.apply(), 'coin')) { after(); j(); }
       },
       lots: () => { this.close(); this.browseLots(); },
-      hirebest: (role, b) => { if (run(b, E.hireBest(s(), id(), role as Role), 'coin')) after(); },
-      train: (eid, b) => { if (run(b, A.train(s(), Number(eid)), 'upgrade')) after(); },
+      hirebest: (role, b) => { const j = this.juice(b, 14); if (run(b, E.hireBest(s(), id(), role as Role), 'hire')) { after(); j(); } },
+      train: (eid, b) => { const j = this.juice(b, 8); if (run(b, A.train(s(), Number(eid)), 'upgrade')) { after(); j(); } },
       fire: (eid, b) => {
         if (this.confirmFire !== Number(eid)) { this.confirmFire = Number(eid); this.armedAt = performance.now(); audio.sfx('click'); return after(); }
         if (performance.now() - this.armedAt < 400) return; // a double-click must not confirm
         this.confirmFire = null; run(b, A.fire(s(), Number(eid)), 'whoosh'); after();
       },
+      keep: () => { this.confirmFire = null; audio.sfx('click'); after(); },
       menu: (rc, b) => { if (run(b, A.toggleMenu(s(), id(), rc), 'pop')) after(); },
-      rule: (k, b) => {
-        const key = k as 'autoHire' | 'autoPrice';
-        if (run(b, A.setPolicy(s(), id(), key, !this.r.policy[key]), 'pop')) after();
-      },
       pickc: (cid) => { this.pickC = cid as ConceptId; audio.sfx('pop'); after(); },
-      convert: (_, b) => { if (this.pickC && run(b, A.setConcept(s(), id(), this.pickC), 'fanfare')) { this.pickC = null; after(); } },
-      upg: (u, b) => { if (run(b, A.buyUpgrade(s(), id(), u), 'upgrade')) after(); },
+      convert: (_, b) => {
+        if (!this.pickC) return;
+        const at = b.getBoundingClientRect();
+        if (!run(b, A.setConcept(s(), id(), this.pickC), 'purchase')) return;
+        this.pickC = null; after();
+        const cur = this.body.querySelector<HTMLElement>('.concept.cur');
+        if (cur) punch(cur);
+        coinBurst({ x: at.left + at.width / 2, y: at.top + at.height / 2 }, 16);
+      },
+      upg: (u, b) => {
+        const at = b.getBoundingClientRect();
+        if (!run(b, A.buyUpgrade(s(), id(), u), 'purchase')) return;
+        after(); // re-render first, then punch whatever now stands there (the next level's button, or the maxed card)
+        const card = this.body.querySelector<HTMLElement>(`[data-upg="${u}"]`);
+        const nb = card?.querySelector<HTMLElement>('[data-act="upg"]') ?? card;
+        if (nb) punch(nb);
+        coinBurst({ x: at.left + at.width / 2, y: at.top + at.height / 2 }, 12);
+      },
       cos: (cid) => {
         const c = COSMETICS[cid];
         if (!c?.apply || !unlockedCosmetics(s()).includes(cid)) return;
@@ -244,21 +275,44 @@ export class Sheet {
     });
   }
 
-  /** What an alert's fix does for THIS restaurant: true cost and action. Restock is empire-wide by nature. */
+  /** Purchase press feedback: remember where the button was, and after the re-render punch whatever now carries the
+   *  same action (the patch replaced the element) and burst coins from the old spot. n = 0: punch only. */
+  private juice(b: HTMLElement, n: number): () => void {
+    const at = b.getBoundingClientRect(), key = `[data-act="${b.dataset.act}"][data-arg="${CSS.escape(b.dataset.arg ?? '')}"]`;
+    return () => {
+      const nb = this.body.querySelector<HTMLElement>(key);
+      if (nb) punch(nb);
+      if (n) coinBurst({ x: at.left + at.width / 2, y: at.top + at.height / 2 }, n);
+    };
+  }
+
+  private best(role: Role) { return this.s.candidates.filter((e) => e.role === role).sort((x, y) => y.skill - x.skill)[0]; }
+
+  /** What hireBest will charge for this role: the best applicant, else a fresh walk-in of random skill, so the
+   *  worst case (skill 5 = ×2.2, as empire.ts prices it). */
+  private bestCost(role: Role): number {
+    const c = this.best(role);
+    return c ? sim.hireCost(c) : Math.round(ROLES[role].hireCost * 2.2);
+  }
+
+  /** Honest hire label: "★3 · ¥4,800" for the applicant hireBest takes, "up to ¥X" when it must hire a walk-in. */
+  private hireLabel(role: Role): string {
+    const c = this.best(role);
+    return c ? `${icon('star', 14)}${c.skill} · ${yen(sim.hireCost(c))}` : `up to ${yen(this.bestCost(role))}`;
+  }
+
+  /** What an alert's fix does for THIS restaurant: true cost and action. */
   private localFix(a: E.Alert): { label: string; cost: number; apply: () => string | null } | null {
     if (!a.fix) return null;
-    const s = this.s, id = this.id;
-    const best = (role: Role) => { const c = s.candidates.filter((e) => e.role === role).sort((x, y) => y.skill - x.skill)[0]; return c ? sim.hireCost(c) : ROLES[role].hireCost; };
+    const s = this.s, id = this.id, best = (role: Role) => this.bestCost(role);
     switch (a.fix.id) {
-      case 'restock': return { label: `${a.fix.label} for all kitchens`, cost: a.fix.cost, apply: () => E.applyFix(s, a) };
       case 'hireMissing': {
         const roles: Role[] = [];
         if (!sim.staffAt(s, id, 'chef').length) roles.push('chef');
         if (CONCEPTS[this.r.concept].needsServer && !sim.staffAt(s, id, 'server').length && !sim.staffAt(s, id, 'manager').length) roles.push('server');
-        return { label: `Hire ${roles.join(' + ') || 'crew'}`, cost: roles.reduce((t, r) => t + best(r), 0), apply: () => roles.map((r) => E.hireBest(s, id, r)).find(Boolean) ?? null };
+        return { label: `Hire best ${roles.join(' + ') || 'crew'}`, cost: roles.reduce((t, r) => t + best(r), 0), apply: () => roles.map((r) => E.hireBest(s, id, r)).find(Boolean) ?? null };
       }
-      case 'hireChef': return { label: 'Hire a chef', cost: best('chef'), apply: () => E.hireBest(s, id, 'chef') };
-      case 'hireCleaner': return { label: 'Hire a cleaner', cost: best('cleaner'), apply: () => E.hireBest(s, id, 'cleaner') };
+      case 'hireChef': return { label: 'Hire best chef', cost: best('chef'), apply: () => E.hireBest(s, id, 'chef') };
       case 'priceUp': return { label: 'Prices +10%', cost: 0, apply: () => { A.setPrice(s, id, this.r.priceMult * 1.1); return null; } };
       case 'priceDown': return { label: 'Prices −10%', cost: 0, apply: () => { A.setPrice(s, id, this.r.priceMult / 1.1); return null; } };
     }
@@ -274,26 +328,30 @@ export class Sheet {
     const days = r.hist.slice(-7);
     const rv = s.reviews?.[this.id] ?? [];
     const here = AREAS[p.district].walkable && s.player.district !== p.district;
+    const py = k.profitYesterday;
+    const kpi = (cls: string, label: string, val: string, sub: string) => `<div class="ov-kpi ${cls}"><span>${label}</span>${val}<small>${sub}</small></div>`;
     return `<div class="ov-top">
         <div class="ov-dial">${dial(k.load, k.automated)}<div class="tiny muted">Kitchen load at the lunch peak</div></div>
         <div class="ov-kpis">
-          <div><span>Today</span><b>${yen(r.day.rev)}</b><small>${exact(r.day.guests)} guests · ${exact(r.day.pieces)} pcs</small></div>
-          <div><span>Yesterday</span><b class="${(k.profitYesterday ?? 0) < 0 ? 'bad' : ''}">${k.profitYesterday === null ? '—' : yen(k.profitYesterday)}</b><small>profit</small></div>
-          <div><span>Stars</span><b>${r.reputation.toFixed(1)}</b><small>${stars(r.reputation)}</small></div>
-          <div><span>Turned away</span><b class="${r.day.lost ? 'bad' : ''}">${exact(r.day.lost)}</b><small>today</small></div>
-          <div><span>Clean</span><b>${Math.round(r.cleanliness * 100)}%</b><small>${bar(r.cleanliness, r.cleanliness < 0.5 ? '' : 'green')}</small></div>
-          <div><span>Stock</span><b>${Number.isFinite(k.stockDays) ? `${k.stockDays.toFixed(1)}d` : '—'}</b><small>of ingredients</small></div>
+          ${kpi('p-money', 'Today', `<b class="num">${yen(r.day.rev)}</b>`, `${exact(r.day.guests)} guests · ${exact(r.day.pieces)} pcs`)}
+          ${kpi('p-money', 'Yesterday', `<b class="num ${py === null ? '' : py < 0 ? 'bad' : 'good'}">${py === null ? '—' : `${py < 0 ? '−' : '+'}${yen(Math.abs(py))}`}</b>`, py === null ? 'opens after the first close' : 'operating profit')}
+          ${kpi('p-info', 'Stars', `<b class="num gold">${r.reputation.toFixed(1)}</b>`, stars(r.reputation))}
+          ${kpi(r.day.lost ? 'p-danger' : 'p-info', 'Turned away', `<b class="num ${r.day.lost ? 'bad' : ''}">${exact(r.day.lost)}</b>`, 'guests today')}
         </div></div>
+      ${k.managed ? `<div class="section slip calm"><span class="sev">${icon('check')}</span><span class="txt">Managed: auto-hires &amp; sets prices.</span></div>`
+        : `<div class="section slip"><span class="sev">${icon('team')}</span><span class="txt">You hire and set prices here. Hire a manager and this place runs itself.</span><button class="btn small brand" data-act="go" data-arg="staff">${icon('team', 16)} Staff</button></div>`}
       ${al.length ? `<div class="section slips">${al.map((a) => `<div class="slip ${a.severity}"><span class="sev">${a.severity === 'critical' ? '急' : a.severity === 'warning' ? '注' : '機'}</span><span class="txt">${esc(a.text)}</span>
-        ${(() => { const f = this.localFix(a); return f ? `<button class="btn small" data-act="fix" data-arg="${a.id}">${esc(f.label)}${f.cost ? ` · ${yen(f.cost)}` : ''}</button>` : ''; })()}
-        ${a.rule && a.rule !== 'autoRestock' ? `<button class="btn small ghost" data-act="go" data-arg="rules">Make it a rule</button>` : ''}</div>`).join('')}</div>`
+        ${(() => { const f = this.localFix(a); return f ? `<button class="btn small ${f.cost ? 'primary' : ''}" data-act="fix" data-arg="${a.id}">${esc(f.label)}${f.cost ? ` · ${yen(f.cost)}` : ''}</button>` : ''; })()}
+</div>`).join('')}</div>`
         : '<div class="section slip calm"><span class="sev">安</span><span class="txt">All quiet here. Nothing needs you.</span></div>'}
-      <div class="section"><h3>Last 7 days <span class="tiny muted">revenue · cost · profit line</span></h3>${pnlChart(days, 110, days.map((d) => 'D' + d.day))}</div>
-      ${here ? `<div class="section"><button class="btn blue" data-act="travel">Ride the metro to ${esc(AREAS[p.district].name)} and walk in</button></div>` : ''}
-      <div class="section"><h3>Reviews 口コミ</h3><div class="reviews">
-        <div class="score"><div class="num">${rv.length ? averageStars(rv).toFixed(2) : '—'}</div>${stars(averageStars(rv))}<div class="tiny muted">${rv.length} review${rv.length === 1 ? '' : 's'}</div></div>
+      <section class="section panel p-money ov-panel"><div class="seal-h">${icon('chart', 28, { variant: 'seal' })}<h3>Last 7 days</h3><span class="ov-legend"><span><i class="rev"></i>Revenue</span><span><i class="cost"></i>Cost</span><span><i class="prof"></i>Profit</span></span></div>
+        <div class="ov-chart">${pnlChart(days, 110, days.map((d) => 'D' + d.day))}</div></section>
+      ${here ? `<div class="section"><button class="btn brand" data-act="travel">${icon('train', 16)} Ride the metro to ${esc(AREAS[p.district].name)} and walk in</button></div>` : ''}
+      <section class="section panel p-info ov-panel"><div class="seal-h">${icon('note', 28, { variant: 'seal' })}<h3>Reviews <span class="ja">口コミ</span></h3><span class="chip">${rv.length} review${rv.length === 1 ? '' : 's'}</span></div>
+        <div class="reviews">
+        <div class="score"><b class="num lg gold">${rv.length ? averageStars(rv).toFixed(2) : '—'}</b>${stars(averageStars(rv))}</div>
         <div class="rv-list">${rv.length ? rv.slice(0, 3).map((x) => `<div class="rv"><div class="spread"><b>${esc(x.author)}</b><span>${stars(x.stars)} <span class="tiny muted">Day ${x.day}</span></span></div><p>${esc(x.text)}</p></div>`).join('')
-          : '<div class="muted small">No reviews yet.</div>'}</div></div></div>`;
+          : '<div class="muted small">No reviews yet.</div>'}</div></div></section>`;
   }
 
   // ------------------------------------------------------------ staff
@@ -301,26 +359,36 @@ export class Sheet {
     const s = this.s, m = sim.mods(s);
     const rows = ROLE_LIST.map((role) => {
       const team = sim.staffAt(s, this.id, role), slots = sim.slotsFor(s, this.id, role);
-      if (!slots && !team.length) return `<div class="role-row none"><span class="role-k">${ROLES[role].emoji}</span><b>${ROLES[role].name}</b><span class="muted small">Not needed in this format</span></div>`;
+      if (!slots && !team.length) return `<div class="role-row none">${icon(ROLES[role].icon, 24)}<b>${ROLES[role].name}</b><span class="muted small">Not needed in this format</span></div>`;
       const locked = s.lifetime.pieces < ROLES[role].unlockPieces;
-      const best = s.candidates.filter((e) => e.role === role).sort((a, b) => b.skill - a.skill)[0];
       const owned = Object.keys(s.restaurants);
       const people = team.map((e) => {
-        const tc = Math.round(trainCost(e.role, e.skill) * m.trainCost);
-        return `<div class="person"><b>${esc(e.name)}</b><span class="lvl">★${e.skill}</span>${bar(e.skill >= MAX_SKILL ? 1 : e.xp / (20 * e.skill * e.skill), 'blue')}
-          <span class="tiny muted">${yen(e.wage)}/day</span>
-          <span class="acts"><button class="btn small blue" data-act="train" data-arg="${e.id}" ${e.skill >= MAX_SKILL ? 'disabled' : ''}>${e.skill >= MAX_SKILL ? 'Master' : 'Train ' + yen(tc)}</button>
+        const tc = Math.round(trainCost(e.role, e.skill) * m.trainCost), armed = this.confirmFire === e.id, master = e.skill >= MAX_SKILL;
+        const xp = master ? 1 : Math.min(1, e.xp / (20 * e.skill * e.skill));
+        return `<div class="person ${armed ? 'armed' : ''}"><b class="p-name">${esc(e.name)}</b><span class="lvl" title="Skill ${e.skill} of ${MAX_SKILL}">${icon('star', 14)}${e.skill}</span>
+          <span class="meter sm" title="${master ? 'Master' : `Experience ${Math.round(xp * 100)}%`}"><i style="width:${(xp * 100).toFixed(0)}%"></i></span>
+          <span class="chip wage">${yen(e.wage)}/day</span>
+          <span class="acts">${armed ? `<span class="fire-q" role="alert">Fire ${esc(e.name.split(' ')[0])}? They leave the company for good.</span>
+            <button class="btn small ghost" data-act="keep" data-arg="${e.id}">Keep</button>
+            <button class="btn small danger confirm fire armed" data-act="fire" data-arg="${e.id}" aria-label="Confirm: fire ${esc(e.name)}">${icon('warn', 14)} Yes, fire</button>`
+          : `<button class="btn small primary ${!master && this.s.cash < tc ? 'poor' : ''}" data-act="train" data-arg="${e.id}" ${master ? 'disabled' : ''}>${master ? 'Master' : `${icon('up', 14)} Train · ${yen(tc)}`}</button>
           <select data-in="move" data-id="${e.id}" aria-label="Move ${esc(e.name)}">${owned.map((o) => `<option value="${o}" ${o === this.id ? 'selected' : ''}>${o === this.id ? 'Stays here' : 'Move → ' + esc(s.restaurants[o].name)}</option>`).join('')}<option value="">Send to reserve</option></select>
-          <button class="btn small ${this.confirmFire === e.id ? 'danger' : 'ghost'}" data-act="fire" data-arg="${e.id}">${this.confirmFire === e.id ? 'Sure?' : 'Fire'}</button></span></div>`;
+          <button class="btn small danger fire" data-act="fire" data-arg="${e.id}" aria-label="Fire ${esc(e.name)}">${icon('warn', 14)} Fire</button>`}</span></div>`;
       }).join('');
       const empty = Math.max(0, slots - team.length);
-      const hireBtn = locked ? `<span class="small muted">🔒 at ${exact(ROLES[role].unlockPieces)} pieces</span>`
-        : `<button class="btn small" data-act="hirebest" data-arg="${role}">Hire best${best ? ` ★${best.skill} · ${yen(sim.hireCost(best))}` : ''}</button>`;
-      return `<div class="role-row"><span class="role-k">${ROLES[role].emoji}</span><b>${ROLES[role].name}</b><span class="slots">${'<i class="f"></i>'.repeat(team.length)}${'<i></i>'.repeat(empty)} <small>${team.length}/${slots}</small></span>
-        ${empty ? hireBtn : ''}<div class="people">${people || '<span class="muted small">Nobody yet.</span>'}</div></div>`;
+      const hireBtn = locked ? `<span class="chip">${icon('lock', 14)} at ${exact(ROLES[role].unlockPieces)} pieces</span>`
+        : `<button class="btn small primary" data-act="hirebest" data-arg="${role}" aria-label="Hire the best ${ROLES[role].name.toLowerCase()} applicant">Hire best ${this.hireLabel(role)}</button>`;
+      return `<section class="role-row panel p-staff"><div class="seal-h">${icon(ROLES[role].icon, 28, { variant: 'seal' })}<h3>${ROLES[role].name}</h3>
+          <span class="slots" title="${team.length} of ${slots} slots filled">${'<i class="f"></i>'.repeat(team.length)}${'<i></i>'.repeat(empty)}<small>${team.length}/${slots}</small></span>${empty ? hireBtn : ''}</div>
+        <div class="people">${people || '<span class="muted small">Nobody yet.</span>'}</div></section>`;
     }).join('');
-    return `<p class="small muted">${CONCEPTS[this.r.concept].needsServer ? 'A chef cooks; a server (or manager) takes orders. With both, this place runs itself.' : 'Ghost kitchens only need chefs.'} Managers unlock house rules and offline earnings.</p>${rows}
-      <div class="section"><button class="btn small ghost" data-act="go" data-arg="rules">House rules can hire for you →</button></div>`;
+    // the one obvious next hire: a chef (nothing sells without one), then a server if the chef is cooking alone.
+    // hireBest takes the most skilled applicant (not the cheapest), so the label says "best" and shows that applicant's fee
+    const next: Role | null = !sim.staffAt(s, this.id, 'chef').length ? 'chef' : sim.understaffed(s, this.id) ? 'server' : null;
+    const hero = next && s.lifetime.pieces >= ROLES[next].unlockPieces ? `<div class="hire-next panel p-staff">${icon(next, 40, { variant: 'seal' })}<span class="txt"><b>${next === 'chef' ? 'You need a chef' : 'You need a server'}</b>
+        <small>${next === 'chef' ? 'Nothing sells without a chef. Once one is on shift, guests start buying.' : 'Your chef is taking orders alone and cooks at half pace. A server fixes that.'}</small></span>
+        <button class="btn big primary" data-act="hirebest" data-arg="${next}">Hire best ${next} · ${this.best(next) ? yen(this.bestCost(next)) : `up to ${yen(this.bestCost(next))}`}</button></div>` : '';
+    return `${hero}<p class="small muted st-intro">${CONCEPTS[this.r.concept].needsServer ? 'A chef cooks; a server takes orders.' : 'Ghost kitchens only need chefs.'} A manager runs the place for you: hires staff and sets prices.</p>${rows}`;
   }
 
   // ------------------------------------------------------------ menu & price
@@ -328,58 +396,58 @@ export class Sheet {
     const s = this.s, r = this.r, k = this.kpi();
     const dem = E.demandPPS(s, this.id), cap = k.load > 0 ? dem / k.load : 0;
     const el2 = AREAS[PROPERTIES[this.id].district].elasticity * CONCEPTS[r.concept].elasticity;
-    return `<div class="pr-read"><div><span>Price</span><b>×${r.priceMult.toFixed(2)}</b></div><div><span>Demand</span><b>${dem.toFixed(1)}<small> pcs/s</small></b></div>
-      <div><span>Kitchen</span><b>${cap.toFixed(1)}<small> pcs/s</small></b></div><div class="${k.load > 1 ? 'bad' : 'good'}"><span>Verdict</span><b>${!k.automated ? 'No crew' : k.load > 1.1 ? 'Turning guests away' : k.load < 0.6 ? 'Seats to spare' : 'Well balanced'}</b></div></div>
+    return `<div class="pr-read"><div><span>Price</span><b class="num">×${r.priceMult.toFixed(2)}</b></div><div><span>Demand</span><b class="num">${dem.toFixed(1)}<small> pcs/s</small></b></div>
+      <div><span>Kitchen</span><b class="num">${cap.toFixed(1)}<small> pcs/s</small></b></div><div class="verdict ${k.load > 1 || !k.automated ? 'bad' : 'good'}"><span>Verdict</span><b>${!k.automated ? 'No crew' : k.load > 1.1 ? 'Turning guests away' : k.load < 0.6 ? 'Seats to spare' : 'Well balanced'}</b></div></div>
       <div class="tiny muted">Guests here are ${el2 < 0.9 ? 'barely' : el2 > 1.4 ? 'very' : 'fairly'} price-sensitive. Bills also include the format's ×${CONCEPTS[r.concept].price} price level.</div>`;
   }
 
   r_menu(): string {
     const s = this.s, r = this.r, m = sim.mods(s), lvl = CONCEPTS[r.concept].price;
-    const card = (id: string, tag = '') => {
+    const card = (id: string) => {
       const rc = RECIPES[id], on = r.menu.includes(id), price = rc.price * r.priceMult * lvl, cost = recipeCost(rc, m.ingredientCost);
-      return `<button class="mi ${on ? 'on' : ''} ${tag}" data-act="menu" data-arg="${id}" aria-pressed="${on}"><span class="tick">${on ? '✓' : ''}</span>
+      return `<button class="mi ${on ? 'on' : ''}" data-act="menu" data-arg="${id}" aria-pressed="${on}"><span class="tick">${on ? icon('check', 14) : ''}</span>
         <b>${esc(rc.name)}</b><small>${rc.jp} · ${Object.keys(rc.ingredients).map((k) => ingIcon(k)).join('')}</small>
-        <span class="mg">${yen(price)} <i>−${yen(cost)}</i> <em class="${price - cost > 0 ? 'good' : 'bad'}">+${yen(price - cost)}</em></span></button>`;
+        <span class="mg">${yen(price)} <i>−${yen(cost)}</i> <em class="${price - cost > 0 ? 'good' : 'bad'}">${price - cost < 0 ? '−' : '+'}${yen(Math.abs(price - cost))}</em></span></button>`;
     };
-    const perm = Object.keys(RECIPES).filter((x) => !(x in SEASONAL_RECIPES));
+    // legacy limited-time recipes stay in RECIPES so old saves load: list only what the player has or can still earn
+    const earnable = new Set([...Array.from({ length: 20 }, (_, i) => milestone(i).reward.recipe), ...Object.values(RESEARCH).map((q) => q.unlockRecipe)]);
+    const perm = Object.keys(RECIPES).filter((x) => s.recipes.includes(x) || earnable.has(x));
     const have = perm.filter((x) => s.recipes.includes(x)).map((x) => card(x)).join('');
     const locked = perm.filter((x) => !s.recipes.includes(x)).map((x) => {
       const res = Object.values(RESEARCH).find((q) => q.unlockRecipe === x);
-      return `<div class="mi locked"><b>🔒 ${esc(RECIPES[x].name)}</b><small>${res ? 'Research: ' + res.name : 'Milestone reward'}</small></div>`;
+      return `<div class="mi locked"><b>${icon('lock', 13)} ${esc(RECIPES[x].name)}</b><small>${res ? 'Research: ' + res.name : 'Milestone reward'}</small></div>`;
     }).join('');
-    const ins = seasonalRecipes(s), se = season(s);
-    const lim = Object.keys(SEASONAL_RECIPES).map((x) => ins.includes(x) ? card(x, 'limited') : `<div class="mi locked"><b>${esc(RECIPES[x].name)}</b><small>${RECIPES[x].jp} · out of season</small></div>`).join('');
-    return `<div class="card"><h3>Price 値段</h3><input type="range" min="0.6" max="2.5" step="0.05" value="${r.priceMult}" data-in="price" aria-label="Price multiplier" aria-valuetext="price ×${r.priceMult.toFixed(2)}">
-        <div id="sh-price">${this.priceRead()}</div></div>
-      <div class="section"><h3>Menu 品書き <span class="tiny muted">tap to put on / take off · price − ingredient cost = margin per piece</span></h3><div class="mgrid">${have}</div></div>
-      <div class="section"><h3>Limited 限定 <span class="tiny muted">${se.emoji} ${se.name}</span></h3><div class="mgrid">${lim}</div></div>
+    return `<section class="panel p-money mn-panel"><div class="seal-h">${icon('yen', 28, { variant: 'seal' })}<h3>Price <span class="ja">値段</span></h3></div>
+        <div class="mn-in"><input type="range" min="0.6" max="2.5" step="0.05" value="${r.priceMult}" data-in="price" aria-label="Price multiplier" aria-valuetext="price ×${r.priceMult.toFixed(2)}">
+        <div id="sh-price">${this.priceRead()}</div></div></section>
+      <section class="section panel p-upgrade mn-panel"><div class="seal-h">${icon('nigiri', 28, { variant: 'seal' })}<h3>Menu <span class="ja">品書き</span></h3><span class="chip">${r.menu.length} on the menu</span></div>
+        <div class="mn-in"><p class="tiny muted mn-hint">Tap a dish to put it on or take it off. Price − ingredient cost = margin per piece.</p><div class="mgrid">${have}</div></div></section>
       ${locked ? `<div class="section"><h3 class="muted">Not yet</h3><div class="mgrid">${locked}</div></div>` : ''}`;
   }
 
-  // ------------------------------------------------------------ house rules
-  r_rules(): string {
-    const s = this.s, r = this.r, ok = A.canUsePolicies(s, this.id);
-    const rule = (key: 'autoHire' | 'autoPrice', k: string, title: string, desc: string) => `
-      <button class="rule ${r.policy[key] ? 'on' : ''} ${ok ? '' : 'locked'}" data-act="rule" data-arg="${key}" role="switch" aria-checked="${r.policy[key]}" ${ok ? '' : 'aria-disabled="true"'}>
-        <span class="rk" aria-hidden="true">${k}</span><span class="rt"><b>${title}</b><small>${desc}</small></span><span class="sw" aria-hidden="true"><i></i></span></button>`;
-    const log = r.log.length ? r.log.slice().reverse().map((l) => `<div class="ln"><span>${esc(l)}</span></div>`).join('') : '<div class="ln muted"><span>No receipts yet today.</span></div>';
-    return `${ok ? '' : `<div class="slip warning"><span class="sev">鍵</span><span class="txt">House rules need a <b>manager</b> at this restaurant, or the <b>${esc(RESEARCH.ops_center?.name ?? 'Operations Center')}</b> research.</span><button class="btn small" data-act="go" data-arg="staff">Hire a manager</button></div>`}
-      <div class="rules">${rule('autoHire', '雇', 'Auto-hire', 'Fills empty chef/server slots and adds chefs when the kitchen is swamped. Keeps a 3-day cash cushion.')}
-        ${rule('autoPrice', '値', 'Smart pricing', 'Nudges prices ±5% each hour: up when guests are turned away, down when the kitchen idles.')}</div>
-      <div class="section"><h3>Today's receipts 本日の記録</h3><div class="receipt small-r"><div class="shop">${esc(r.name)}</div><div class="meta">DAY ${s.day} · house rule log</div><hr>${log}</div></div>`;
-  }
-
   // ------------------------------------------------------------ books
+  // Operating books only (ingredients + wages + rent). Wages and rent are charged at closing (sim.endDay), so the
+  // open day adds tonight's bill up front; otherwise "Today" looks wildly profitable and then drops at midnight.
+  // Every figure is floored once per row and totals are sums of the shown rows, so the columns always add up.
   r_books(): string {
-    const r = this.r;
-    const rows = [...r.hist, r.day];
-    const tot = rows.reduce((a, d) => ({ rev: a.rev + d.rev, cost: a.cost + d.cost, g: a.g + d.guests }), { rev: 0, cost: 0, g: 0 });
-    const tr = (d: RestDay, today = false) => `<tr class="${today ? 'today' : ''}"><td>${today ? 'Today' : 'Day ' + d.day}</td><td>${exact(d.guests)}</td><td>${exact(d.pieces)}</td><td class="${d.lost ? 'bad' : ''}">${exact(d.lost)}</td><td>${yenExact(d.rev)}</td><td>−${yenExact(d.cost)}</td><td class="${d.rev - d.cost < 0 ? 'bad' : 'good'}">${yenExact(d.rev - d.cost)}</td></tr>`;
-    return `${pnlChart(r.hist, 150, r.hist.map((d) => 'D' + d.day))}
-      <div class="section"><table class="books"><thead><tr><th>Day</th><th>Guests</th><th>Pieces</th><th>Lost</th><th>Revenue</th><th>Cost</th><th>Profit</th></tr></thead>
-      <tbody>${tr(r.day, true)}${r.hist.slice().reverse().map((d) => tr(d)).join('')}</tbody>
-      <tfoot><tr><td>${rows.length} days</td><td>${exact(tot.g)}</td><td></td><td></td><td>${yenExact(tot.rev)}</td><td>−${yenExact(tot.cost)}</td><td class="${tot.rev - tot.cost < 0 ? 'bad' : 'good'}">${yenExact(tot.rev - tot.cost)}</td></tr></tfoot></table></div>
-      <div class="tiny muted">Cost = ingredients used + this location's wages + rent. Lifetime here: ${exact(r.served)} guests, ${yen(r.revenue)} revenue.</div>`;
+    const s = this.s, r = this.r;
+    const due = sim.staffAt(s, this.id).reduce((a, e) => a + e.wage, 0) + sim.restaurantRent(s, this.id);
+    const row = (d: RestDay, extra = 0) => { const rev = Math.floor(d.rev), cost = Math.floor(d.cost + extra); return { d, rev, cost, p: rev - cost }; };
+    const today = row(r.day, due), past = r.hist.map((d) => row(d));
+    const tot = past.reduce((a, x) => ({ g: a.g + x.d.guests, pcs: a.pcs + x.d.pieces, lost: a.lost + x.d.lost, rev: a.rev + x.rev, cost: a.cost + x.cost, p: a.p + x.p }), { g: 0, pcs: 0, lost: 0, rev: 0, cost: 0, p: 0 });
+    const signed = (v: number) => `${v < 0 ? '−' : v > 0 ? '+' : ''}¥${exact(Math.abs(v))}`;
+    const pc = (v: number) => (v < 0 ? 'bad' : 'good');
+    const cells = (x: { rev: number; cost: number; p: number }) => `<td class="m">¥${exact(x.rev)}</td><td class="m cost">−¥${exact(x.cost)}</td><td class="m ${pc(x.p)}">${signed(x.p)}</td>`;
+    const tr = (x: ReturnType<typeof row>, label: string, cls = '') => `<tr class="${cls}"><td>${label}</td><td>${exact(x.d.guests)}</td><td>${exact(x.d.pieces)}</td><td class="${x.d.lost ? 'bad' : ''}">${exact(x.d.lost)}</td>${cells(x)}</tr>`;
+    const last = past[past.length - 1];
+    const kpi = (label: string, v: number | null, sub: string) => `<div><span>${label}</span><b class="num ${v === null ? 'ink' : pc(v)}">${v === null ? '—' : signed(v)}</b><small>${sub}</small></div>`;
+    return `<section class="panel p-money books-panel"><div class="seal-h">${icon('receipt', 28, { variant: 'seal' })}<h3>Books 帳簿</h3><span class="chip">operating profit</span></div>
+      <div class="bk-kpis">${kpi('Today so far', today.p, `after ¥${exact(due)} wages + rent due tonight`)}${kpi('Last closed day', last ? last.p : null, last ? `Day ${last.d.day}` : 'no closed day yet')}${kpi(`${past.length}-day total`, past.length ? tot.p : null, past.length ? `${exact(tot.g)} guests` : 'opens after closing')}</div>
+      <div class="bk-chart">${pnlChart(r.hist, 130, r.hist.map((d) => 'D' + d.day))}${r.hist.length ? '<div class="bk-legend"><span><i style="background:#4d7d33"></i>Revenue</span><span><i style="background:#ea9a8f"></i>Operating cost</span><span><i style="background:#8f6a1f"></i>Profit</span></div>' : ''}</div>
+      <div class="bk-table"><table class="books"><thead><tr><th>Day</th><th>Guests</th><th>Pieces</th><th>Lost</th><th>Revenue</th><th>Op. cost</th><th>Op. profit</th></tr></thead>
+      <tbody>${tr(today, `Today<small>so far, incl. tonight's ¥${exact(due)}</small>`, 'today')}${past.slice().reverse().map((x) => tr(x, 'Day ' + x.d.day)).join('')}</tbody>
+      ${past.length ? `<tfoot><tr><td>${past.length} closed day${past.length === 1 ? '' : 's'}</td><td>${exact(tot.g)}</td><td>${exact(tot.pcs)}</td><td class="${tot.lost ? 'bad' : ''}">${exact(tot.lost)}</td>${cells(tot)}</tr></tfoot>` : ''}</table>
+      <p class="bk-note"><b>Op. cost</b> = ingredients used + this location's wages + rent (billed at closing). One-off spending such as hires, training, upgrades and refits is <b>investment</b>, not cost: it's tracked empire-wide in Manage → Finances. Totals and the chart cover closed days only. Lifetime here: ${exact(r.served)} guests, ${yen(r.revenue)} revenue.</p></div></section>`;
   }
 
   // ------------------------------------------------------------ format
@@ -394,9 +462,9 @@ export class Sheet {
       const slots = role === 'chef' ? Math.max(1, Math.round(sim.chefSlots(s, this.id) * c!.staff)) : c!.needsServer ? PROPERTIES[this.id].serverSlots : 0;
       return have > slots ? `${have - slots} ${role}${have - slots > 1 ? 's' : ''} → reserve at half wage` : '';
     }).filter(Boolean) : [];
-    return `<p class="small muted">Switching format refits the place: staff, upgrades and reputation stay. ${pick ? `As a ${c!.name}, rent would be <b>${yen(Math.round(PROPERTIES[this.id].rent * c!.rent))}/day</b>${bumped.length ? `; <b>${bumped.join(', ')}</b>` : '; nobody is moved'}.` : `Rent today: ${yen(sim.restaurantRent(s, this.id))}/day.`}</p>
+    return `<p class="fmt-note">Switching format refits the place: staff, upgrades and reputation stay. ${pick ? `As a ${c!.name}, rent would be <b>${yen(Math.round(PROPERTIES[this.id].rent * c!.rent))}/day</b>${bumped.length ? `; <b>${bumped.join(', ')}</b>` : '; nobody is moved'}.` : `Rent today: <b>${yen(sim.restaurantRent(s, this.id))}/day</b>. Pick a format to compare.`}</p>
       <div class="concepts">${conceptCards(s, this.id, pick ?? r.concept, 'switch')}</div>
-      <div class="buybar">${pick ? `<span>Convert to <b>${CONCEPTS[pick].name}</b> for <b>${yen(cost)}</b></span><button class="btn big" data-act="convert" ${why ? 'disabled' : ''}>${why ? esc(why) : 'Refit 改装'}</button>` : '<span class="muted">Pick a format above to compare.</span>'}</div>`;
+      ${pick ? `<div class="buybar"><span>Convert to <b>${CONCEPTS[pick].name}</b> for <b>${yen(cost)}</b><small>${esc(CONCEPTS[pick].desc)}</small></span><button class="btn big primary ${!why && s.cash < cost ? 'poor' : ''}" data-act="convert" ${why ? 'disabled' : ''}>${why ? esc(why) : 'Refit 改装'}</button></div>` : ''}`;
   }
 
   // ------------------------------------------------------------ upgrades & look
@@ -404,21 +472,23 @@ export class Sheet {
     const s = this.s, r = this.r, id = this.id;
     const upg = Object.values(UPGRADES).map((u) => {
       const lvl = r.upgrades[u.id] ?? 0, mx = A.upgradeMax(id, u.id), maxed = lvl >= mx, cost = A.upgradePrice(s, id, u.id);
-      return `<div class="card upg ${maxed ? 'done' : ''}"><div class="spread"><span class="em">${u.emoji}</span>${pips(lvl, mx)}</div>
-        <b>${u.name}</b><div class="tiny muted">${u.desc}</div><div style="flex:1"></div>
-        ${maxed ? `<button class="btn small" disabled>MAX</button>` : `<button class="btn small ${s.cash >= cost ? '' : 'poor'}" data-act="upg" data-arg="${u.id}">Upgrade ${yen(cost)}</button>`}</div>`;
+      return `<div class="card p-upgrade upg ${maxed ? 'done' : ''}" data-upg="${u.id}"><div class="upg-h">${icon(u.icon, 30, { variant: 'seal' })}<b>${u.name}</b></div>
+        <div class="upg-lv">${pips(lvl, mx)}<span>Lv ${lvl}/${mx}</span></div>
+        <p class="upg-d">${u.desc}</p>
+        ${maxed ? `<span class="chip p-upgrade max">${icon('check', 14)} Maxed out</span>` : `<button class="btn primary small ${s.cash >= cost ? '' : 'poor'}" data-act="upg" data-arg="${u.id}">${icon('up', 16)} Upgrade · ${cost < 1e5 ? yenExact(cost) : yen(cost)}</button>`}</div>`;
     }).join('');
     const owned = unlockedCosmetics(s);
     const extras = Object.entries(COSMETICS).map(([cid, c]) => owned.includes(cid)
       ? `<button class="cos" data-act="cos" data-arg="${cid}"><i style="background:${c.swatch}"></i>${esc(c.name)}</button>`
       : `<span class="cos locked" title="Unlock through an achievement"><i></i>???</span>`).join('');
-    return `<div class="grid g3">${upg}</div>
-      <div class="section"><h3>Look 装い</h3><div class="card row wrap" style="gap:16px">
-        <label class="field">Restaurant name<input type="text" maxlength="30" value="${esc(r.name)}" data-in="rname"></label>
-        <label class="field">Sign color<input type="color" value="${r.signColor}" data-in="sign"></label>
+    return `<div class="upg-grid">${upg}</div>
+      <section class="section panel p-info look-panel"><div class="seal-h">${icon('pencil', 28, { variant: 'seal' })}<h3>Look <span class="ja">装い</span></h3><span class="chip">${short(r.served)} guests served</span></div>
+        <div class="look-in"><div class="look-fields">
+        <label class="field look-name">Restaurant name<input type="text" maxlength="30" value="${esc(r.name)}" data-in="rname"></label>
+        <label class="field">Sign colour<input type="color" value="${r.signColor}" data-in="sign"></label>
         <label class="field">Uniforms<input type="color" value="${r.uniform}" data-in="uniform"></label>
         <label class="field">Interior theme<select data-in="theme">${THEMES.map((t, i) => `<option value="${i}" ${r.theme === i ? 'selected' : ''}>${t}</option>`).join('')}</select></label></div>
-      <div class="card section"><b>Unlocked extras</b> <span class="tiny muted">from achievements</span><div class="cos-row">${extras}</div></div></div>
-      <p class="tiny muted">${AREAS[PROPERTIES[id].district].walkable ? 'Changes show up in the 3D street.' : 'This area is run from the books; its look lives in your guests\' imagination.'} Lifetime: ${short(r.served)} guests.</p>`;
+        <div class="look-extras"><b>Unlocked extras</b> <span class="tiny muted">earned from achievements</span><div class="cos-row">${extras}</div></div>
+        <p class="tiny muted look-note">${AREAS[PROPERTIES[id].district].walkable ? 'Changes show up in the 3D street.' : 'This area is run from the books; its look lives in your guests\' imagination.'}</p></div></section>`;
   }
 }

@@ -1,14 +1,13 @@
 // Player business actions. Each returns null on success or a human-readable reason it failed.
 import { emit, toast } from './bus';
 import {
-  CAMPAIGNS, CITIES, DISTRICTS, DistrictId, FACILITIES, FacilityId, HQ_MAX, MAX_SKILL, PROPERTIES, RESEARCH, RIVALS,
+  CAMPAIGNS, CITIES, FACILITIES, FacilityId, HQ_MAX, MAX_SKILL, PROPERTIES, RESEARCH,
   ROLES, UPGRADES, franchiseCost, hqCost, trainCost, upgradeCost, wageFor,
 } from './data';
 import { yen } from './format';
 import { GameState, newRestaurant } from './state';
 import { AREAS, CONCEPTS, ConceptId, RECIPES, Role } from './data';
-import { seasonalRecipes } from './seasons';
-import { buyoutCost, hireCost, mods, neededIngredients, slotsFor, spend, staffAt } from './sim';
+import { hireCost, mods, slotsFor, spend, staffAt } from './sim';
 
 type Result = string | null;
 const changed = () => emit('restaurantsChanged', {});
@@ -32,7 +31,7 @@ export function buyUpgrade(s: GameState, restId: string, upgId: string): Result 
   if (!spend(s, cost)) return `Need ${yen(cost)}`;
   r.upgrades[upgId] = lvl + 1;
   emit('upgrade', { restaurant: restId, upgrade: upgId, level: lvl + 1 });
-  toast(`${u.emoji} ${u.name} upgraded to level ${lvl + 1}!`, 'good');
+  toast(`${u.name} upgraded to level ${lvl + 1}!`, 'good', u.icon);
   changed();
   return null;
 }
@@ -48,7 +47,7 @@ export function hire(s: GameState, candidateId: number, restId: string | null, q
   c.restaurant = restId;
   s.staff.push(c);
   emit('hire', { role: c.role });
-  if (!quiet) toast(`${ROLES[c.role].emoji} Hired ${c.name}!`, 'good');
+  if (!quiet) toast(`Hired ${c.name}!`, 'good', ROLES[c.role].icon);
   changed();
   return null;
 }
@@ -81,7 +80,7 @@ export function train(s: GameState, empId: number): Result {
   e.skill++; e.xp = 0;
   emit('train', { role: e.role });
   e.wage = wageFor(e.role, e.skill);
-  toast(`🎓 ${e.name} trained to skill ${e.skill}`, 'good');
+  toast(`${e.name} trained to skill ${e.skill}`, 'good', 'cap');
   return null;
 }
 
@@ -94,7 +93,7 @@ export function unlockDistrict(s: GameState, d: string): Result {
   if (s.lifetime.pieces < def.unlock.pieces) return `Sell ${def.unlock.pieces.toLocaleString()} pieces first`;
   if (!spend(s, def.unlock.cost)) return `Need ${yen(def.unlock.cost)} (business permit)`;
   s.districts.push(d);
-  toast(def.walkable ? `🗾 ${def.name} unlocked! Take the metro to visit.` : `🗾 ${def.name} unlocked! Run restaurants there from the empire ledger.`, 'gold');
+  toast(def.walkable ? `${def.name} unlocked! Take the metro to visit.` : `${def.name} unlocked! Run restaurants there from the empire ledger.`, 'gold', 'map');
   emit('purchase', { what: d });
   return null;
 }
@@ -127,7 +126,7 @@ export function buyProperty(s: GameState, propId: string, concept: ConceptId = P
   const byPrice = [...s.recipes].sort((a, b) => RECIPES[a].price - RECIPES[b].price);
   r.menu = concept === 'omakase' ? byPrice.slice(-6) : concept === 'kaiten' || concept === 'kiosk' ? byPrice.slice(0, 6) : s.recipes.slice(0, 6);
   if (concept === 'omakase') r.priceMult = 1.2;
-  toast(`🎉 Grand opening: ${p.name} (${CONCEPTS[concept].name})!`, 'gold');
+  toast(`Grand opening: ${p.name} (${CONCEPTS[concept].name})!`, 'gold', 'fireworks');
   emit('purchase', { what: propId });
   changed();
   return null;
@@ -146,19 +145,8 @@ export function setConcept(s: GameState, restId: string, concept: ConceptId): Re
   // extra chefs/servers beyond the new format's slots are moved to the unassigned pool
   // keep the most skilled; the rest move to the unassigned pool
   for (const role of ['chef', 'server'] as Role[]) [...staffAt(s, restId, role)].sort((a, b) => b.skill - a.skill).slice(slotsFor(s, restId, role)).forEach((e) => { e.workedDay = s.day; e.restaurant = null; });
-  toast(`${CONCEPTS[concept].emoji} ${r.name} is now a ${CONCEPTS[concept].name}!`, 'good');
+  toast(`${r.name} is now a ${CONCEPTS[concept].name}!`, 'good', CONCEPTS[concept].icon);
   changed();
-  return null;
-}
-
-/** House rules (auto-hire / smart pricing) need a manager at that restaurant or the Operations Center research. */
-export const canUsePolicies = (s: GameState, restId: string) => s.research.includes('ops_center') || staffAt(s, restId, 'manager').length > 0;
-
-export function setPolicy(s: GameState, restId: string, key: 'autoHire' | 'autoPrice', on: boolean): Result {
-  const r = s.restaurants[restId];
-  if (!r) return 'Not owned';
-  if (on && !canUsePolicies(s, restId)) return 'Needs a manager here, or research Operations Center';
-  r.policy[key] = on;
   return null;
 }
 
@@ -168,13 +156,11 @@ export function setPrice(s: GameState, restId: string, mult: number): void {
 
 export function toggleMenu(s: GameState, restId: string, recipe: string): Result {
   const r = s.restaurants[restId];
-  const orderable = (m: string) => s.recipes.includes(m) || seasonalRecipes(s).includes(m);
   if (r.menu.includes(recipe)) {
-    // keep at least one permanent (non-seasonal) recipe so a menu never goes empty when a season ends
-    if (s.recipes.includes(recipe) && r.menu.filter((m) => s.recipes.includes(m)).length <= 1) return 'Menu needs at least one item';
+    if (r.menu.length <= 1) return 'Menu needs at least one item';
     r.menu = r.menu.filter((m) => m !== recipe);
   } else {
-    if (!orderable(recipe)) return 'Recipe not unlocked';
+    if (!s.recipes.includes(recipe)) return 'Recipe not unlocked';
     r.menu.push(recipe);
   }
   return null;
@@ -189,7 +175,7 @@ export function launchCampaign(s: GameState, id: string): Result {
   s.campaigns.push({ id, district: c.scope === 'district' ? s.player.district : null, endsDay: s.day + c.days, endsMinute });
   s.brand = Math.min(100, s.brand + c.brand * 0.5);
   emit('campaign', { id });
-  toast(`${c.emoji} ${c.name} launched!`, 'good');
+  toast(`${c.name} launched!`, 'good', c.icon);
   return null;
 }
 
@@ -210,8 +196,7 @@ export function doResearch(s: GameState, id: string): Result {
   s.rp -= r.cost;
   s.research.push(id);
   if (r.unlockRecipe && !s.recipes.includes(r.unlockRecipe)) s.recipes.push(r.unlockRecipe);
-  if (id === 'auto_restock') for (const k of neededIngredients(s)) s.restock[k] = Math.max(s.restock[k], 60);
-  toast(`🔬 Research complete: ${r.name}`, 'good');
+  toast(`Research complete: ${r.name}`, 'good', 'flask');
   return null;
 }
 
@@ -222,7 +207,7 @@ export function openCity(s: GameState, cityId: string): Result {
   if (s.lifetime.pieces < c.minPieces) return `Sell ${c.minPieces.toLocaleString()} pieces`;
   if (!spend(s, c.openCost)) return `Need ${yen(c.openCost)}`;
   s.cities[cityId] = { open: true, franchises: 0 };
-  toast(`${c.flag} Expanded to ${c.name}!`, 'gold');
+  toast(`Expanded to ${c.name}!`, 'gold', c.icon);
   emit('purchase', { what: cityId });
   return null;
 }
@@ -238,7 +223,7 @@ export function buyFranchise(s: GameState, cityId: string): Result {
   const cost = franchisePrice(s, cityId);
   if (!spend(s, cost)) return `Need ${yen(cost)}`;
   st.franchises++;
-  toast(`🏪 New franchise in ${CITIES[cityId].name} (#${st.franchises})`, 'good');
+  toast(`New franchise in ${CITIES[cityId].name} (#${st.franchises})`, 'good', 'shop');
   return null;
 }
 
@@ -248,7 +233,7 @@ export function buyHQ(s: GameState): Result {
   const cost = hqCost(s.hq);
   if (!spend(s, cost)) return `Need ${yen(cost)}`;
   s.hq++;
-  toast(`🏢 Headquarters expanded to floor ${s.hq * 5}!`, 'gold');
+  toast(`Headquarters expanded to floor ${s.hq * 5}!`, 'gold', 'office');
   changed();
   return null;
 }
@@ -265,23 +250,6 @@ export function buyFacility(s: GameState, id: FacilityId): Result {
   const cost = facilityPrice(s, id);
   if (!spend(s, cost)) return `Need ${yen(cost)}`;
   s.facilities[id]++;
-  toast(`${f.emoji} ${f.name} level ${s.facilities[id]}`, 'good');
+  toast(`${f.name} level ${s.facilities[id]}`, 'good', f.icon);
   return null;
-}
-
-export function buyout(s: GameState, rid: string, d: DistrictId): Result {
-  if (!s.flags.chapter2) return 'Sell 1,000,000 pieces first';
-  if (s.rivals[rid][d] === undefined) return 'Already bought out';
-  const cost = buyoutCost(s, rid, d);
-  if (!spend(s, cost)) return `Need ${yen(cost)}`;
-  delete s.rivals[rid][d];
-  toast(`🤝 You bought out ${RIVALS[rid].name} in ${DISTRICTS[d].name}!`, 'gold');
-  changed();
-  return null;
-}
-
-/** Player wipes tables / sweeps at their restaurant. */
-export function playerClean(s: GameState, restId: string): void {
-  const r = s.restaurants[restId];
-  r.cleanliness = Math.min(1, r.cleanliness + 0.35);
 }

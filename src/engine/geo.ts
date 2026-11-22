@@ -2,13 +2,12 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-/** Shared painterly-lighting knobs (rim strength). */
-export const paintFx = { rim: { value: 0.28 } };
+/** Shared lighting knob: strength of the faint rim light. */
+export const paintFx = { rim: { value: 0.06 } };
 
 /**
- * Painterly look on top of MeshStandardMaterial (keeps shadows, fog, vertex colors):
- * wrapped + softly banded sun light (two gentle cel steps) and a warm rim light.
- * Composes with an existing onBeforeCompile hook.
+ * Clean architectural-model shading: plain physically based light (no cel banding), plus a very faint
+ * warm rim so figures and props separate from the background. Composes with an existing onBeforeCompile hook.
  */
 export function painterly<T extends THREE.MeshStandardMaterial>(mat: T): T {
   const prev = mat.onBeforeCompile;
@@ -16,15 +15,6 @@ export function painterly<T extends THREE.MeshStandardMaterial>(mat: T): T {
     prev?.call(mat, sh, r);
     sh.uniforms.uRim = paintFx.rim;
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <lights_physical_pars_fragment>', THREE.ShaderChunk.lights_physical_pars_fragment
-        // diffuse only: wrapped + two soft cel steps. Specular keeps the true N·L (a wrapped term there
-        // explodes the GGX visibility term at silhouettes).
-        .replace('float dotNL = saturate( dot( geometryNormal, directLight.direction ) );',
-          `float dotNL = saturate( dot( geometryNormal, directLight.direction ) );
-	float wrapNL = saturate( ( dot( geometryNormal, directLight.direction ) + 0.3 ) / 1.3 );
-	float toonNL = mix( wrapNL, 0.12 + 0.5 * smoothstep( 0.26, 0.34, wrapNL ) + 0.38 * smoothstep( 0.62, 0.72, wrapNL ), 0.6 );`)
-        .replace('reflectedLight.directDiffuse += irradiance * diffuseBRDF * ( 1.0 - F );',
-          'reflectedLight.directDiffuse += toonNL * directLight.color * diffuseBRDF * ( 1.0 - F );'))
       .replace('#include <common>', '#include <common>\nuniform float uRim;')
       .replace('#include <opaque_fragment>', `{
 	float rimF = pow( 1.0 - saturate( dot( normal, normalize( vViewPosition ) ) ), 3.0 );
@@ -33,12 +23,12 @@ export function painterly<T extends THREE.MeshStandardMaterial>(mat: T): T {
 #include <opaque_fragment>`);
   };
   const key = mat.customProgramCacheKey.bind(mat);
-  mat.customProgramCacheKey = () => key() + '|painterly';
+  mat.customProgramCacheKey = () => key() + '|rim';
   return mat;
 }
 
 /** Shared material for all vertex-colored merged meshes. */
-export const VC_MAT = painterly(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0 }));
+export const VC_MAT = painterly(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 }));
 
 /** Flat vertex color for one part. Keeps the geometry indexed (no vertex tripling). */
 export function paint(g: THREE.BufferGeometry, color: string): THREE.BufferGeometry {

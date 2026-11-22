@@ -1,0 +1,19 @@
+/* Late cross-surface fixes. Imported last on purpose: these rules must win over everything above. */
+/* dashboard host: the Daichō fills the tab body */
+.tab-body.dc-host { overflow: hidden; padding: 0; display: flex; flex-direction: column; }
+.tab-body.dc-host > #mg-content { flex: 1; min-height: 0; height: 100%; }
+@media (max-width: 1100px) { .ov-top { grid-template-columns: 1fr; } .lot-facts { grid-template-columns: repeat(3, 1fr); } }
+/* keep toasts readable beside an open restaurant sheet */
+#ui-root:has(.sheet-wrap.open) .toasts { right: calc(min(820px, 96vw) + 14px); }
+
+/* each window is its own stacking context: dashboard tooltips/sticky rows never paint over a sheet or dialog */
+.modal { isolation: isolate; }
+/* a closing window's backdrop still absorbs stray clicks (no click-through), but nothing inside it can be activated */
+#ui-root .modal.closing { pointer-events: auto; }
+#ui-root .modal.closing > * { pointer-events: none; }
+
+/* review C */
+.sh-title { min-width: 0; } .sh-title h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.receipt .shop { overflow-wrap: anywhere; }
+/* toasts never cover an open dialog's footer (Sign the lease, Refit…): move them to the top-right */
+#ui-root:has(.modal.open:not(.sheet-wrap)) .toasts { top: 70px; bottom: auto; flex-direction: column; }

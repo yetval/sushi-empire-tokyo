@@ -12,14 +12,14 @@ function seeded(seed = 42) {
   return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 
-function addStaff(s: GameState, role: 'chef' | 'server' | 'cleaner' | 'manager', rest: string | null, skill = 3) {
+function addStaff(s: GameState, role: 'chef' | 'server' | 'manager', rest: string | null, skill = 3) {
   const e = sim.makeCandidate(s, role); e.skill = skill; e.restaurant = rest; s.staff.push(e);
 }
 
 /** Mid/late game: several districts and restaurants, staff, all recipes; every quest kind is eligible. */
 function richState(): GameState {
   const s = createNewState();
-  s.lifetime.pieces = 60_000; s.lifetime.manualOrders = 50; s.milestoneIndex = 4;
+  s.lifetime.pieces = 60_000; s.milestoneIndex = 4;
   s.cash = 5_000_000;
   s.districts = [...DISTRICT_IDS];
   s.recipes = Object.keys(RECIPES);
@@ -101,7 +101,7 @@ describe('rolling', () => {
   });
 
   it('fresh-state rolls never include locked content', () => {
-    const allowed: QuestKind[] = ['serve', 'office', 'recipe', 'earn', 'perfect', 'lunch', 'upgrade', 'hire']; // hiring is open from day one
+    const allowed: QuestKind[] = ['serve', 'office', 'recipe', 'earn', 'lunch', 'upgrade', 'hire']; // hiring is open from day one
     const s = createNewState();
     for (let seed = 1; seed < 300; seed++) {
       for (const x of rollDailyQuests(s, seeded(seed))) {
@@ -160,7 +160,6 @@ describe('scaling', () => {
   it('fresh targets are small and doable', () => {
     const s = createNewState();
     expect(rollUntil(s, 'serve').target).toBeLessThanOrEqual(15);
-    expect(rollUntil(s, 'perfect').target).toBe(1);
     expect(rollUntil(s, 'upgrade').target).toBe(1);
   });
 });
@@ -174,13 +173,11 @@ describe('every kind is reachable', () => {
     recipe: (q, s, x) => questOnEvent(q, s, sale({ recipe: x.meta!.recipe, pieces: 5 })),
     district: (q, s, x) => questOnEvent(q, s, sale({ restaurant: Object.keys(s.restaurants).find((id) => id.startsWith(x.meta!.district!))!, pieces: 8 })),
     earn: (q, s) => questOnEvent(q, s, sale({ revenue: 50_000 })),
-    perfect: (q, s) => questOnEvent(q, s, { type: 'manualCook', restaurant: 'asakusa_stand', score: 0.95 }),
     upgrade: (q, s) => questOnEvent(q, s, { type: 'upgrade', restaurant: 'asakusa_stand', upgrade: 'sign' }),
     hire: (q, s) => questOnEvent(q, s, { type: 'hire', role: 'chef' }),
     train: (q, s) => questOnEvent(q, s, { type: 'train', role: 'chef' }),
     campaign: (q, s) => questOnEvent(q, s, { type: 'campaign', id: 'flyers' }),
     travel: (q, s, x) => questOnEvent(q, s, { type: 'travel', district: x.meta!.district! }),
-    clean: (q, s) => questOnEvent(q, s, { type: 'clean', restaurant: 'asakusa_stand', cleanlinessBefore: 0.5 }),
     stars: (q, s, x) => { s.restaurants[x.meta!.restaurant!].reputation = 4.8; questOnEvent(q, s, { type: 'dayEnd' }); },
     lunch: (q, s) => {
       s.minute = 12 * 60; questOnEvent(q, s, sale());
@@ -204,13 +201,11 @@ describe('every kind is reachable', () => {
 
   it('wrong events do not count', () => {
     const s = richState();
-    const q: QuestState = { day: s.day, list: [rollUntil(s, 'recipe'), rollUntil(s, 'travel'), rollUntil(s, 'clean')], streak: 0 };
-    const [recipe, travel, clean] = q.list;
+    const q: QuestState = { day: s.day, list: [rollUntil(s, 'recipe'), rollUntil(s, 'travel')], streak: 0 };
+    const [recipe, travel] = q.list;
     questOnEvent(q, s, sale({ recipe: Object.keys(RECIPES).find((r) => r !== recipe.meta!.recipe)! }));
     questOnEvent(q, s, { type: 'travel', district: s.player.district });
-    questOnEvent(q, s, { type: 'clean', restaurant: 'asakusa_stand', cleanlinessBefore: 0.84 });
-    questOnEvent(q, s, { type: 'manualCook', restaurant: 'asakusa_stand', score: 0.9 });
-    expect([recipe.progress, travel.progress, clean.progress]).toEqual([0, 0, 0]);
+    expect([recipe.progress, travel.progress]).toEqual([0, 0]);
   });
 
   it('a lunch walk-out fails the lunch quest', () => {

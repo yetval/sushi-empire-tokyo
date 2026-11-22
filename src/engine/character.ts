@@ -1,19 +1,24 @@
-// Procedural cartoon character: chibi proportions built from lathe-turned, tapered parts, baked into
-// 7 vertex-colored meshes (head, eyes, torso, 2 arms, 2 legs). Each avatar gets a stable "personality"
-// (eye shape, brows, mouth, shoes, blush) derived from its fields, plus idle life (blinks, look-around,
-// weight shifts) and smooth pose blending.
+// Procedural people: properly proportioned figures (~7.5 heads, 1.72 m), like the scale figures in an
+// architect's model, but fully modelled: neck, shaped torso, shoulders, upper/lower arms with elbows, hands,
+// thighs/shins with knees, shoes, hair meshes and tailored clothing (suits, coats, aprons, skirts, bags).
+// Every person is ONE skinned, vertex-coloured mesh (1 draw call + 1 shadow call) with 12 rigid bones,
+// built in model space (feet on y = 0, facing +z). A low-poly LOD is built lazily for distant figures.
 import * as THREE from 'three';
 import { Avatar } from '../core/state';
 import { VC_MAT, at, merge, paint, shade } from './geo';
 
-export type Anim = 'idle' | 'walk' | 'run' | 'jump' | 'cook' | 'carry' | 'sit' | 'wave' | 'eat' | 'interact' | 'cheer' | 'angry';
+export type Anim = 'idle' | 'walk' | 'run' | 'jump' | 'cook' | 'carry' | 'sit' | 'wave' | 'eat' | 'interact' | 'cheer' | 'angry' | 'photo' | 'phone' | 'sip' | 'vending';
 
 export interface Outfit {
   apron?: boolean | string;
   tie?: string; bag?: string; vest?: string; trim?: string;
-  cut?: 'coat' | 'blazer' | 'workwear' | 'knit';
+  /** coat = chef whites / work coat, blazer = suit jacket, workwear = zip jacket / school jacket, knit = sweater, longcoat = knee-length overcoat */
+  cut?: 'coat' | 'blazer' | 'workwear' | 'knit' | 'longcoat';
+  skirt?: string; // skirt colour (replaces trousers; legs show tights)
   glasses?: 'round' | 'square';
   detail?: 'freckles' | 'stubble' | 'moustache' | 'earrings';
+  /** child proportions: larger head, shorter legs (combine with a small Character scale) */
+  child?: boolean;
 }
 
 /** Hair style names for 0..8 (UI can show these). */
@@ -23,349 +28,417 @@ export const UNIFORM_STYLE_NAMES = ['Indigo apron', 'Brick apron', 'Canvas apron
 const UNIFORMS = ['#344654', '#803c36', '#cbb386'];
 
 const MAT = VC_MAT;
-const HIP = 0.5; // hip pivot height: feet rest exactly on y = 0
 
-// Segment counts scale with the LOD being built (Q = 0.72 near, 0.42 far); FAR also drops tiny details.
+// ---------------------------------------------------------------- skeleton (model space, metres)
+const HIP = 0.92; // pelvis pivot; feet rest exactly on y = 0
+const KNEE = 0.49;
+const SHO_X = 0.17, SHO_Y = 1.41;
+const ELB_Y = 1.13;
+const NECK = 1.465;
+const HEAD_C = 1.615; // centre of the skull
+const EYE_Y = HEAD_C + 0.008;
+const LEG_X = 0.088;
+const SIT_DROP = 0.42; // seated, the pelvis rests on a ~0.45 m stool
+
+/** Bones (rigid skinning: every vertex follows exactly one bone). Bind pose has no rotation. */
+const enum B { Body, Chest, Head, Eyes, ArmL, ArmR, LegL, LegR, KneeL, KneeR, ElbowL, ElbowR }
+const BIND: [number, number, number][] = [ // model-space bind position of each bone
+  [0, HIP, 0], [0, 1.04, 0], [0, NECK, 0], [0, EYE_Y, 0.08],
+  [-SHO_X, SHO_Y, 0], [SHO_X, SHO_Y, 0], [-LEG_X, HIP, 0], [LEG_X, HIP, 0],
+  [-LEG_X, KNEE, 0.004], [LEG_X, KNEE, 0.004], [-SHO_X - 0.012, ELB_Y, -0.01], [SHO_X + 0.012, ELB_Y, -0.01],
+];
+const PARENT = [-1, B.Body, B.Chest, B.Head, B.Chest, B.Chest, B.Body, B.Body, B.LegL, B.LegR, B.ArmL, B.ArmR];
+
+// Segment counts scale with the LOD being built (Q = 1 near, 0.5 far); FAR also drops tiny details.
 let Q = 1, FAR = false;
 const sg = (n: number, min = 3) => Math.max(min, Math.round(n * Q));
-const sphere = (r: number, w = 8, h = 6) => new THREE.SphereGeometry(r, sg(w), sg(h, 2));
-const capsule = (r: number, len: number, cap = 2, rad = 8) => new THREE.CapsuleGeometry(r, len, Math.max(1, Math.round(cap * Q)), sg(rad));
-const box = (w: number, h: number, d: number) => new THREE.BoxGeometry(w, h, d);
-const cyl = (rt: number, rb: number, h: number, seg = 10) => new THREE.CylinderGeometry(rt, rb, h, sg(seg));
-const torus = (r: number, t: number, arc = Math.PI * 2) => new THREE.TorusGeometry(r, t, sg(4), sg(12), arc);
-const lathe = (pts: [number, number][], seg = 10) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), sg(seg));
+const sphere = (r: number, w = 12, h = 8) => new THREE.SphereGeometry(r, sg(w), sg(h, 2));
+const capsule = (r: number, len: number, cap = 3, rad = 10) => new THREE.CapsuleGeometry(r, len, Math.max(1, Math.round(cap * Q)), sg(rad));
+const cyl = (rt: number, rb: number, h: number, seg = 12) => new THREE.CylinderGeometry(rt, rb, h, sg(seg));
+const torus = (r: number, t: number, arc = Math.PI * 2, seg = 16) => new THREE.TorusGeometry(r, t, sg(5), sg(seg), arc);
+/** Lathe of [radius, y] points listed bottom → top (outward normals); optional arc for open garments. */
+const lathe = (pts: [number, number][], seg = 14, phi0 = 0, phiLen = Math.PI * 2) =>
+  new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(Math.max(0.0005, r), y)), sg(seg, 5), phi0, phiLen);
+/** Same lathe, faces flipped: the lining of an open garment (seen through the opening). */
+const lining = (pts: [number, number][], seg = 14, phi0 = 0, phiLen = Math.PI * 2) =>
+  lathe(pts.map(([r, y]) => [r - 0.004, y] as [number, number]).reverse(), seg, phi0, phiLen);
+/** A rounded slab between two points in the xz-plane is overkill here: rounded boxes are capsules squashed. */
+const pill = (w: number, h: number, d: number) => {
+  const r = Math.min(w, d) / 2;
+  return at(capsule(r, Math.max(0.001, h - 2 * r), 2, 10), 0, 0, 0, 0, 0, 0, w / (2 * r), 1, d / (2 * r));
+};
 
-// ---------------------------------------------------------------- personality
-const FACE = [
-  { width: 0.95, height: 0.96, jaw: 0.91, eyes: 1, brow: 0.15, nose: 1, mouth: 0 },
-  { width: 0.88, height: 1.07, jaw: 0.98, eyes: 0.84, brow: -0.02, nose: 1.25, mouth: 3 },
-  { width: 1.01, height: 0.95, jaw: 1.15, eyes: 0.81, brow: -0.14, nose: 1.12, mouth: 3 },
-  { width: 0.98, height: 1.01, jaw: 0.76, eyes: 1.12, brow: 0.24, nose: 0.83, mouth: 1 },
-  { width: 1.07, height: 0.91, jaw: 1.02, eyes: 1.17, brow: 0.11, nose: 0.91, mouth: 0 },
-] as const;
-
-interface Persona {
-  face: typeof FACE[number]; shoe: string; sole: string; iris: string;
-}
-
-function persona(a: Avatar): Persona {
-  let h = 2166136261;
-  for (const ch of a.skin + a.hair) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
-  const ordinal = h >>> 0;
-  const shoes: [string, string][] = [['#3b2a20', '#1f1612'], ['#1e1e24', '#111'], ['#f4f1ea', '#d94b3d'], ['#f4f1ea', '#2b5aa8'], ['#7a4a2a', '#2a1a10']];
-  const s = shoes[ordinal % shoes.length];
-  const iris = ['#51362c', '#76523a', '#393038', '#48534c'][(ordinal >>> 8) % 4];
-  return { face: FACE[a.faceStyle ?? 0] ?? FACE[0], shoe: s[0], sole: s[1], iris };
-}
-
-// ---------------------------------------------------------------- head (face looks toward +z)
-function capHair(h: string, r = 0.318, theta = 0.5, tilt = -0.28): THREE.BufferGeometry {
-  return paint(at(new THREE.SphereGeometry(r, sg(14), sg(7, 2), 0, Math.PI * 2, 0, Math.PI * theta), 0, 0.02, -0.015, tilt, 0, 0), h);
-}
-
-function buildHead(a: Avatar, p: Persona, outfit: Outfit): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = [];
-  const skin = a.skin, h = a.hair, face = p.face;
-  const skull = sphere(0.3, 25, 19);
-  const vertices = skull.getAttribute('position');
-  for (let i = 0; i < vertices.count; i++) {
-    const y = vertices.getY(i);
-    const jaw = THREE.MathUtils.smoothstep(-y, 0.035, 0.205);
-    const x = vertices.getX(i) * (1 + (face.jaw - 1) * jaw);
-    const z = vertices.getZ(i);
-    vertices.setXYZ(i, x, y * 0.94, z > 0 ? z * 0.96 + jaw * 0.009 : z * 0.96);
-  }
-  skull.computeVertexNormals();
-  parts.push(paint(skull, skin));
-  for (const side of [-1, 1]) {
-    const ear = side * 0.284;
-    parts.push(paint(at(sphere(0.064, 8, 6), ear, -0.042, -0.009, 0, 0, side * -0.17, 0.55, 1, 0.8), skin));
-    if (!FAR) {
-      parts.push(paint(at(sphere(0.03, 6, 4), ear + side * 0.014, -0.04, 0.027, 0, 0, 0, 0.55, 0.8, 0.27), shade(skin, 0.8)));
-      if (outfit.detail === 'earrings') parts.push(paint(at(torus(0.025, 0.006), ear + side * 0.021, -0.1, 0.020, 0, side * 0.35), '#bf9650'));
-    }
-    const brow = a.hairStyle === 4 && outfit.detail !== 'moustache' ? shade(skin, 0.52) : shade(h, 0.8);
-    parts.push(paint(at(capsule(0.010, 0.056, 2, 5), side * 0.109, 0.083, 0.269, 0, side * 0.35, Math.PI / 2 - side * face.brow), brow));
-    if (!FAR && outfit.detail === 'freckles') {
-      for (let i = 0; i < 4; i++) {
-        const x = 0.119 + i * 0.021, y = -0.045 - (i % 2) * 0.016;
-        const z = Math.sqrt(0.3 ** 2 - x * x - y * y) * 0.96 + 0.004;
-        parts.push(paint(at(sphere(0.007, 5, 4), x * side, y, z, 0, side * 0.35, 0, 1, 0.8, 0.35), shade(skin, 0.62)));
-      }
-    }
-  }
-  parts.push(paint(at(sphere(0.034, 9, 7), 0, -0.042, 0.285, -0.25, 0, 0, 0.85, 0.87, face.nose), shade(skin, 0.94)));
-
-  const lip = new THREE.Color(skin).lerp(new THREE.Color('#5d2d2a'), 0.57).getStyle();
-  if (face.mouth === 0) {
-    parts.push(paint(at(torus(0.037, 0.007, Math.PI), 0, -0.096, 0.273, Math.PI, 0, 0, 1.22, 0.58, 1), lip));
-  } else if (face.mouth === 1) {
-    parts.push(paint(at(sphere(0.034, 9, 6), 0, -0.118, 0.274, -0.15, 0, 0.14, 1.22, 0.49, 0.22), lip));
-  } else {
-    parts.push(paint(at(capsule(0.006, 0.045, 2, 5), 0, -0.113, 0.277, 0, 0, Math.PI / 2 - 0.12), lip));
-  }
-
-  if (outfit.detail === 'moustache') {
-    for (const side of [-1, 1]) {
-      const curve = capsule(0.016, 0.050, 2, 6);
-      parts.push(paint(at(curve, side * 0.034, -0.077, 0.295, 0, side * 0.28, Math.PI / 2 + side * 0.24), h));
-      parts.push(paint(at(capsule(0.024, 0.048, 2, 5), side * 0.27, -0.003, -0.047, 0.4, 0, side * 0.36), h));
-    }
-  } else if (outfit.detail === 'stubble' && !FAR) {
-    for (let i = 0; i < 12; i++) {
-      const x = (i % 6 - 2.5) * 0.025, y = -0.155 - Math.floor(i / 6) * 0.029;
-      const z = Math.sqrt(0.3 ** 2 - x * x - (y / 0.94) ** 2) * 0.96 + 0.014;
-      parts.push(paint(at(sphere(0.005, 4, 3), x, y, z, 0, 0, 0, 1, 1, 0.5), shade(skin, 0.59)));
-    }
-  }
-
-  if (outfit.glasses) {
-    const tint = outfit.glasses === 'round' ? '#9a794e' : '#3d3435';
-    for (const side of [-1, 1]) {
-      const x = side * 0.109;
-      if (outfit.glasses === 'round') {
-        parts.push(paint(at(torus(0.068, 0.007), x, 0.007, 0.309, 0, side * 0.13, 0, 1, 0.87, 1), tint));
-      } else {
-        for (const y of [-0.041, 0.055]) parts.push(paint(at(capsule(0.007, 0.116, 2, 5), x, y, 0.310, 0, side * 0.1, Math.PI / 2), tint));
-        for (const offset of [-0.062, 0.062]) parts.push(paint(at(capsule(0.007, 0.085, 2, 5), x + offset, 0.007, 0.309 - side * offset * 0.1), tint));
-      }
-      parts.push(paint(at(box(0.010, 0.012, 0.125), side * 0.181, 0.028, 0.247, 0, side * -0.54, 0), tint));
-    }
-    parts.push(paint(at(box(0.079, 0.011, 0.012), 0, 0.021, 0.317), tint));
-  }
-  // hair
-  switch (a.hairStyle) {
-    case 0: // short with fringe
-      parts.push(capHair(h));
-      for (const x of [-0.13, -0.04, 0.06, 0.14]) parts.push(paint(at(sphere(0.085, 6, 5), x, 0.17, 0.2, 0.3, 0, x, 1, 0.55, 0.7), h));
-      break;
-    case 1: // messy student
-      parts.push(capHair(h, 0.312, 0.47));
-      for (let i = 0; i < 11; i++) {
-        const ang = i * 2.4, rr = 0.1 + (i % 3) * 0.06;
-        parts.push(paint(at(new THREE.ConeGeometry(0.07, 0.2, sg(5)), Math.cos(ang) * rr, 0.27 - (i % 3) * 0.03, Math.sin(ang) * rr - 0.02, Math.sin(ang) * 0.7, ang, -Math.cos(ang) * 0.7), h));
-      }
-      for (const x of [-0.1, 0.02, 0.12]) parts.push(paint(at(new THREE.ConeGeometry(0.06, 0.17, sg(5)), x, 0.18, 0.24, 2.2, 0, x * 2), h));
-      break;
-    case 2: // long straight
-      parts.push(capHair(h, 0.325, 0.55));
-      parts.push(paint(at(capsule(0.2, 0.32, 2, 9), 0, -0.2, -0.14, 0, 0, 0, 1.35, 1, 0.55), h));
-      for (const sx of [-1, 1]) parts.push(paint(at(capsule(0.06, 0.3, 2, 6), sx * 0.26, -0.15, 0.06, 0, 0, sx * 0.06), h));
-      for (const x of [-0.11, 0, 0.11]) parts.push(paint(at(sphere(0.08, 6, 5), x, 0.17, 0.21, 0.3, 0, 0, 1, 0.5, 0.7), h));
-      break;
-    case 3: // bun
-      parts.push(capHair(h));
-      parts.push(paint(at(sphere(0.12, 9, 6), 0, 0.31, -0.1), h));
-      parts.push(paint(at(torus(0.085, 0.022), 0, 0.24, -0.08, Math.PI / 2 - 0.4, 0, 0), '#c0392b'));
-      break;
-    case 4: break; // bald
-    case 5: { // bob: shell open at the face + straight bangs
-      parts.push(paint(at(new THREE.SphereGeometry(0.335, sg(14), sg(7, 2), Math.PI / 2 + 0.95, Math.PI * 2 - 1.9, 0, Math.PI * 0.68), 0, 0.01, -0.01), h));
-      parts.push(capHair(h, 0.33, 0.36, -0.1));
-      parts.push(paint(at(capsule(0.05, 0.34, 2, 6), 0, 0.165, 0.245, 0, 0, Math.PI / 2, 1, 1, 0.7), h));
-      break;
-    }
-    case 6: // ponytail
-      parts.push(capHair(h));
-      parts.push(paint(at(sphere(0.045), 0, 0.1, -0.31), '#e84393'));
-      parts.push(paint(at(capsule(0.075, 0.3, 2, 8), 0, -0.08, -0.38, 0.45, 0, 0, 1, 1, 0.85), h));
-      for (const x of [-0.12, 0.0, 0.12]) parts.push(paint(at(sphere(0.08, 6, 5), x, 0.17, 0.21, 0.3, 0, 0, 1, 0.5, 0.7), h));
-      break;
-    case 7: // twin tails
-      parts.push(capHair(h));
-      for (const sx of [-1, 1]) {
-        parts.push(paint(at(sphere(0.04), sx * 0.27, 0.12, -0.1), '#ffd23f'));
-        parts.push(paint(at(capsule(0.07, 0.32, 2, 8), sx * 0.36, -0.08, -0.12, 0.15, 0, sx * 0.35), h));
-      }
-      for (const x of [-0.1, 0.02, 0.13]) parts.push(paint(at(sphere(0.08, 6, 5), x, 0.17, 0.21, 0.3, 0, 0, 1, 0.5, 0.7), h));
-      break;
-    default: // 8: side-part salaryman
-      parts.push(capHair(h, 0.316, 0.48, -0.2));
-      parts.push(paint(at(sphere(0.16, 9, 6), 0.07, 0.2, 0.13, 0.3, 0, -0.35, 1.25, 0.42, 0.95), h));
-      parts.push(paint(at(sphere(0.1, 7, 5), -0.17, 0.15, 0.12, 0, 0, 0.5, 0.8, 0.5, 1), h));
-  }
-  // headwear
-  const capC = a.shirt === '#ffffff' ? '#e63946' : a.shirt;
-  switch (a.headwear) {
-    case 1: // folded kitchen cap with a flat, sewn crown
-      parts.push(paint(at(lathe([[0.239, 0.225], [0.265, 0.249], [0.273, 0.295], [0.269, 0.35], [0.239, 0.398], [0.185, 0.417], [0, 0.422]], 20), 0, 0, 0.006, -0.07), '#eae2d1'));
-      parts.push(paint(at(lathe([[0.252, 0.243], [0.267, 0.257], [0.271, 0.275]], 18), 0, 0, 0.007, -0.07), '#d1c4ae'));
-      if (!FAR) for (const x of [-0.112, -0.056, 0, 0.056, 0.112]) {
-        parts.push(paint(at(capsule(0.004, 0.061, 2, 5), x, 0.333, Math.sqrt(0.26 ** 2 - x * x) - 0.006, -0.19, 0, -x * 0.6), '#cbbda8'));
-      }
-      break;
-    case 2: // hachimaki headband with a red rising-sun dot and knotted tails
-      parts.push(paint(lathe([[0.314, 0.095], [0.322, 0.103], [0.321, 0.143], [0.313, 0.15]], 22), '#ebe0c9'));
-      parts.push(paint(at(new THREE.CircleGeometry(0.021, sg(10)), 0, 0.121, 0.324), '#a4443b'));
-      parts.push(paint(at(sphere(0.033), -0.037, 0.122, -0.323), '#ebe0c9'));
-      for (const side of [-1, 1]) parts.push(paint(at(capsule(0.018, 0.122, 2, 6), -0.042 + side * 0.027, 0.043, -0.333, 0.23, 0, side * 0.49, 1, 1, 0.33), '#dfd5c0'));
-      break;
-    case 3: // baseball cap
-      parts.push(paint(at(new THREE.SphereGeometry(0.325, sg(11), sg(6, 2), 0, Math.PI * 2, 0, Math.PI * 0.5), 0, 0.06, 0), capC));
-      parts.push(paint(at(cyl(0.21, 0.21, 0.025, 12), 0, 0.085, 0.24, 0.12, 0, 0, 1, 1, 0.75), shade(capC, 0.8)));
-      parts.push(paint(at(sphere(0.03), 0, 0.38, 0), shade(capC, 0.8)));
-      break;
-  }
-  return merge(parts);
-}
-
-function buildEyes(p: Persona): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = [];
-  for (const side of [-1, 1]) {
-    const x = side * 0.110, yaw = side * 0.26;
-    const height = p.face.eyes;
-    parts.push(paint(at(sphere(0.047, 11, 8), x, 0.010, 0.263, 0, yaw, 0, 1.07, height, 0.44), '#f8eee3'));
-    parts.push(paint(at(sphere(0.032, 9, 7), x + 0.002, 0.011, 0.283, 0, yaw, 0, 0.91, height, 0.48), p.iris));
-    parts.push(paint(at(sphere(0.019, 8, 6), x + 0.003, 0.012, 0.296, 0, yaw, 0, 0.85, height, 0.54), '#221d20'));
-    parts.push(paint(at(sphere(0.008, 5, 4), x - 0.006, 0.023, 0.305), '#fff9ef'));
-    if (!FAR) parts.push(paint(at(torus(0.042, 0.004, Math.PI), x, 0.011, 0.280, 0, yaw, 0, 1.13, height, 1), '#4c322e'));
-  }
-  return merge(parts);
-}
-
-// ---------------------------------------------------------------- body
-function clothPanel(points: [number, number][], z: number, color: string): THREE.BufferGeometry {
+/** A flat garment panel (lapel, tie, apron bib), extruded a hair thick with a soft bevel, facing +z at depth z. */
+function panel(points: [number, number][], z: number, color: string, depth = 0.006): THREE.BufferGeometry {
   const shape = new THREE.Shape();
   points.forEach(([x, y], i) => i ? shape.lineTo(x, y) : shape.moveTo(x, y));
   shape.closePath();
   return paint(at(new THREE.ExtrudeGeometry(shape, {
-    depth: 0.007, bevelEnabled: !FAR, bevelThickness: 0.003, bevelSize: 0.003, bevelSegments: 1,
+    depth, bevelEnabled: !FAR, bevelThickness: 0.002, bevelSize: 0.002, bevelSegments: 1, curveSegments: 2,
   }), 0, 0, z), color);
 }
 
-function workCut(o: Outfit): NonNullable<Outfit['cut']> | undefined { return o.cut ?? (o.apron === true ? 'coat' : undefined); }
+// ---------------------------------------------------------------- personality
+const FACE = [
+  { width: 1, jaw: 0.86, chin: 0, nose: 1, height: 1 },
+  { width: 0.94, jaw: 0.82, chin: 0.006, nose: 1.15, height: 1.05 },
+  { width: 1.04, jaw: 0.97, chin: -0.002, nose: 1.05, height: 0.98 },
+  { width: 0.97, jaw: 0.74, chin: 0.01, nose: 0.9, height: 1.01 },
+  { width: 1.06, jaw: 0.92, chin: -0.004, nose: 0.92, height: 0.95 },
+] as const;
 
-function buildTorso(a: Avatar, o: Outfit): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = [];
-  const z = 0.78; // depth squash: bodies are a little flatter than round
-  const cut = workCut(o);
-  const jacket = o.vest ?? a.shirt;
-  const trimColor = o.trim ?? shade(jacket, 1.27);
-  // pants / hips (tapered lathe), belt, shirt (waist → chest → shoulders)
-  parts.push(paint(at(lathe([[0.001, -0.04], [0.17, -0.03], [0.195, 0.04], [0.185, 0.16]]), 0, 0, 0, 0, 0, 0, 1, 1, z), a.pants));
-  parts.push(paint(at(torus(0.183, 0.022), 0, 0.15, 0, Math.PI / 2, 0, 0, 1, z, 1), '#2b2220'));
-  parts.push(paint(at(box(0.06, 0.045, 0.02), 0, 0.15, 0.148), '#d4a017'));
-  parts.push(paint(at(lathe([[0.18, 0.15], [0.17, 0.24], [0.19, 0.36], [0.205, 0.45], [0.16, 0.52], [0.06, 0.55], [0.001, 0.555]]), 0, 0, 0, 0, 0, 0, 1, 1, z), a.shirt));
-  parts.push(paint(at(cyl(0.062, 0.07, 0.1, 6), 0, 0.58, 0), a.skin)); // neck
-  // collar points + buttons + chest pocket
-  const trim = shade(a.shirt, a.shirt === '#ffffff' ? 0.92 : 0.8);
-  for (const sx of [-1, 1]) parts.push(paint(at(box(0.08, 0.05, 0.02), sx * 0.045, 0.52, 0.115, -0.5, 0, sx * 0.6), trim));
-  if (!o.apron && !o.vest && !cut) {
-    if (!FAR) for (const y of [0.25, 0.33, 0.41]) parts.push(paint(at(sphere(0.011, 4, 2), 0, y, 0.152 - (0.41 - y) * 0.02), shade(a.shirt, 0.7)));
-    if (!FAR) parts.push(paint(at(box(0.07, 0.07, 0.012), -0.09, 0.38, 0.152, -0.12, 0, 0), trim));
+interface Persona { face: typeof FACE[number]; shoe: string; sole: string; build: number }
+
+function persona(a: Avatar): Persona {
+  let h = 2166136261;
+  for (const ch of a.skin + a.hair + a.shirt) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  const o = h >>> 0;
+  const shoes: [string, string][] = [['#3b2c24', '#211915'], ['#26262b', '#151517'], ['#ece8df', '#b9b3a8'], ['#6d4a33', '#2b1d15'], ['#43454d', '#1d1e22']];
+  const s = shoes[o % shoes.length];
+  return { face: FACE[a.faceStyle ?? 0] ?? FACE[0], shoe: s[0], sole: s[1], build: 0.95 + ((o >>> 8) % 100) / 1000 };
+}
+
+type Part = [THREE.BufferGeometry, B];
+
+// ---------------------------------------------------------------- head (model space)
+function skull(skin: string, p: Persona): THREE.BufferGeometry {
+  const g = sphere(0.1, 22, 16);
+  const v = g.getAttribute('position');
+  const f = p.face;
+  for (let i = 0; i < v.count; i++) {
+    let x = v.getX(i), y = v.getY(i), z = v.getZ(i);
+    const low = THREE.MathUtils.smoothstep(-y, 0.0, 0.1); // 0 above the cheekbones → 1 at the chin
+    x *= 0.78 * f.width * (1 - (1 - f.jaw) * low);
+    z *= 0.97 * (1 - 0.12 * low * (z < 0 ? 1 : 0)); // the jaw tucks in behind
+    if (z > 0) z += 0.006 * low; // chin forward a touch
+    y = y * 1.1 * f.height - f.chin * low;
+    v.setXYZ(i, x, y, z);
   }
-  if (cut === 'coat') {
-    parts.push(clothPanel([[-0.11, 0.517], [-0.04, 0.532], [0.111, 0.369], [0.071, 0.326]], 0.141, trimColor));
-    parts.push(clothPanel([[0.091, 0.525], [0.138, 0.500], [-0.045, 0.354], [-0.068, 0.385]], 0.158, shade(a.shirt, 0.88)));
-    for (const y of [0.401, 0.453]) parts.push(paint(at(sphere(0.011, 5, 4), 0.105, y, 0.152), shade(a.shirt, 0.72)));
-  } else if (cut === 'blazer' || cut === 'workwear') {
-    parts.push(paint(at(lathe([[0.193, 0.16], [0.184, 0.24], [0.202, 0.36], [0.21, 0.445], [0.169, 0.502]]), 0, 0, 0, 0, 0, 0, 1.03, 1, 0.82), jacket));
-    parts.push(clothPanel([[-0.095, 0.501], [0.095, 0.501], [0.047, 0.261], [-0.047, 0.261]], 0.153, a.shirt));
-    for (const side of [-1, 1]) {
-      if (cut === 'blazer') {
-        parts.push(clothPanel([[side * 0.11, 0.505], [side * 0.145, 0.447], [side * 0.107, 0.429], [side * 0.122, 0.396], [side * 0.032, 0.31]], 0.171, shade(jacket, 1.19)));
-      } else {
-        parts.push(clothPanel([[side * 0.045, 0.505], [side * 0.14, 0.485], [side * 0.103, 0.421], [side * 0.066, 0.451]], 0.169, trimColor));
-        parts.push(clothPanel([[side * 0.117, 0.373], [side * 0.174, 0.373], [side * 0.176, 0.299], [side * 0.12, 0.290]], 0.153, shade(jacket, 1.35)));
+  g.computeVertexNormals();
+  return paint(at(g, 0, HEAD_C, 0), skin);
+}
+
+/** Hair shell: a slice of a slightly larger skull. theta = how far down from the crown it reaches. */
+function shell(hair: string, p: Persona, theta: number, opts: { phi0?: number; phiLen?: number; grow?: number; dy?: number; dz?: number; tilt?: number } = {}): THREE.BufferGeometry {
+  const grow = (opts.grow ?? 1.08) + 0.03;
+  const g = new THREE.SphereGeometry(0.1, sg(20), sg(10, 3), opts.phi0 ?? 0, opts.phiLen ?? Math.PI * 2, 0, Math.PI * theta);
+  return paint(at(g, 0, HEAD_C + (opts.dy ?? 0.004), opts.dz ?? -0.006, opts.tilt ?? -0.22, 0, 0, 0.8 * p.face.width * grow, 1.1 * p.face.height * grow, 0.99 * grow), hair);
+}
+
+function buildHead(a: Avatar, p: Persona, o: Outfit): Part[] {
+  const g: THREE.BufferGeometry[] = [];
+  const skin = a.skin, hair = a.hair, w = p.face.width;
+  g.push(skull(skin, p));
+  // neck (rides the head bone; its base hides inside the collar)
+  g.push(paint(lathe([[0.05, NECK - 0.035], [0.047, NECK + 0.02], [0.044, NECK + 0.07], [0.05, NECK + 0.1]], 12), skin));
+  // ears
+  for (const sd of [-1, 1]) g.push(paint(at(sphere(0.02, 8, 6), sd * 0.078 * w, HEAD_C - 0.005, -0.006, 0, sd * 0.3, 0, 0.45, 1.3, 0.9), shade(skin, 0.95)));
+  // nose: a soft wedge with a shaded underside, so it reads from a few metres away
+  g.push(paint(at(new THREE.ConeGeometry(0.014, 0.04 * p.face.nose, sg(8)), 0, HEAD_C - 0.012, 0.096, -0.32, 0, 0, 1, 1, 0.75), shade(skin, 0.97)));
+  g.push(paint(at(sphere(0.011, 8, 6), 0, HEAD_C - 0.03, 0.1, 0, 0, 0, 1.3, 0.6, 0.8), shade(skin, 0.88)));
+  // cheek/eye-socket shading: a slightly darker band just above the cheekbones gives the face structure
+  if (!FAR) for (const sd of [-1, 1]) g.push(paint(at(sphere(0.019, 10, 6), sd * 0.031 * w, EYE_Y + 0.006, 0.079, 0, sd * 0.25, 0, 1.25, 0.8, 0.45), shade(skin, 0.9)));
+  {
+    // brows + mouth: clean and understated, like a fine scale figure
+    const brow = a.hairStyle === 4 ? shade(skin, 0.55) : shade(hair, 0.85);
+    for (const sd of [-1, 1]) g.push(paint(at(capsule(0.0055, 0.026, 2, 5), sd * 0.032 * w, HEAD_C + 0.036, 0.091, 0.15, sd * 0.32, Math.PI / 2 - sd * 0.14, 1, 1, 0.7), brow));
+    const lip = new THREE.Color(skin).lerp(new THREE.Color('#6e3530'), 0.55).getStyle();
+    g.push(paint(at(capsule(0.005, 0.024, 2, 6), 0, HEAD_C - 0.051, 0.088, 0, 0, Math.PI / 2, 1, 1, 0.7), lip));
+  }
+  if (!FAR) {
+    if (o.detail === 'earrings') for (const sd of [-1, 1]) g.push(paint(at(sphere(0.006, 6, 4), sd * 0.08 * w, HEAD_C - 0.034, 0.002), '#c9a45c'));
+  }
+  if (o.detail === 'moustache') g.push(paint(at(capsule(0.007, 0.03, 2, 6), 0, HEAD_C - 0.038, 0.091, 0, 0, Math.PI / 2, 1, 1, 0.7), shade(hair, 0.9)));
+  if (o.detail === 'stubble' && !FAR) g.push(paint(at(new THREE.SphereGeometry(0.1, sg(18), sg(8), Math.PI * 1.25, Math.PI * 1.5, Math.PI * 0.55, Math.PI * 0.4), 0, HEAD_C + 0.002, 0.002, 0, 0, 0, 0.8 * w * 0.99, 1.1, 1.0), shade(skin, 0.86)));
+  if (o.glasses && !FAR) {
+    const c = o.glasses === 'round' ? '#8a6c45' : '#2d2a2b';
+    for (const sd of [-1, 1]) {
+      g.push(paint(at(torus(0.017, 0.0022, Math.PI * 2, 12), sd * 0.031, EYE_Y, 0.099, 0, 0, 0, 1, o.glasses === 'round' ? 1 : 0.78, 1), c));
+      g.push(paint(at(cyl(0.0018, 0.0018, 0.085, 4), sd * 0.074 * w, EYE_Y + 0.004, 0.055, Math.PI / 2, 0, 0), c));
+    }
+    g.push(paint(at(cyl(0.0018, 0.0018, 0.028, 4), 0, EYE_Y + 0.004, 0.1, 0, 0, Math.PI / 2), c));
+  }
+  hairMesh(g, a, p);
+  headwear(g, a, p);
+  return [[merge(g), B.Head]];
+}
+
+function hairMesh(g: THREE.BufferGeometry[], a: Avatar, p: Persona): void {
+  const h = a.hair, w = p.face.width;
+  const v = p.build * 1000 % 7; // stable per-person variation 0..7
+  // a soft volume on the crown so short cuts don't sit like a helmet
+  const crown = (dy = 0.0) => g.push(paint(at(sphere(0.07, 12, 8), (v - 3.5) * 0.002, HEAD_C + 0.075 + dy, -0.02, -0.3, 0, 0, 1.15 * w, 0.55, 1.25), h));
+  const fringe = (y: number, z: number, n: number, span: number, len = 0.05) => {
+    for (let i = 0; i < n; i++) {
+      const t = n === 1 ? 0 : i / (n - 1) - 0.5;
+      g.push(paint(at(capsule(0.016, len, 2, 6), t * span * w, y, z - Math.abs(t) * 0.03, 1.25, 0, t * 0.9, 1, 1, 0.55), h));
+    }
+  };
+  switch (a.hairStyle) {
+    case 0: // short, tidy, swept fringe
+      g.push(shell(h, p, 0.5));
+      crown();
+      fringe(HEAD_C + 0.062, 0.084, 3 + (v > 3 ? 1 : 0), 0.1 + v * 0.004, 0.032 + v * 0.002);
+      break;
+    case 1: // messy: tufts over a cap
+      g.push(shell(h, p, 0.5, { grow: 1.1 }));
+      for (let i = 0; i < (FAR ? 4 : 10); i++) {
+        const ang = i * 2.4, rr = 0.03 + (i % 3) * 0.022;
+        g.push(paint(at(new THREE.ConeGeometry(0.022, 0.06, sg(5)), Math.cos(ang) * rr * w, HEAD_C + 0.105 - (i % 3) * 0.01, Math.sin(ang) * rr - 0.01, Math.sin(ang) * 0.8, ang, -Math.cos(ang) * 0.8), h));
       }
-    }
-    if (!FAR) {
-      parts.push(paint(at(box(0.067, 0.013, 0.017), -0.116, 0.284, 0.159), trimColor));
-      for (const y of [0.217, 0.274]) parts.push(paint(at(sphere(0.008, 5, 4), 0.024, y, 0.173), '#ac8a60'));
-    }
-  } else if (cut === 'knit') {
-    for (const [y, width] of [[0.198, 0.177], [0.252, 0.178], [0.32, 0.19], [0.394, 0.201]]) {
-      parts.push(paint(at(lathe([[width, y], [width + 0.005, y + 0.024]]), 0, 0, 0, 0, 0, 0, 1, 1, 0.80), trimColor));
-    }
-    parts.push(paint(at(torus(0.071, 0.011), 0, 0.546, 0, Math.PI / 2, 0, 0, 1, 0.83), trimColor));
-  } else if (o.vest) {
-    parts.push(paint(at(lathe([[0.19, 0.17], [0.178, 0.25], [0.198, 0.36], [0.21, 0.45], [0.17, 0.5]]), 0, 0, 0, 0, 0, 0, 1.02, 1, z * 1.03), o.vest));
-    parts.push(paint(at(box(0.07, 0.3, 0.02), 0, 0.33, 0.152), a.shirt)); // shirt placket between lapels
-    if (!FAR) for (const y of [0.24, 0.31]) parts.push(paint(at(sphere(0.012, 4, 2), 0.045, y, 0.16), '#d4af37'));
+      fringe(HEAD_C + 0.06, 0.085, 4, 0.12, 0.045);
+      break;
+    case 2: // long, straight, past the shoulders
+      g.push(shell(h, p, 0.52, { grow: 1.1 }));
+      g.push(paint(lathe([[0.075, HEAD_C - 0.2], [0.09, HEAD_C - 0.12], [0.098, HEAD_C - 0.02], [0.094, HEAD_C + 0.04]], 14, Math.PI * 0.62, Math.PI * 0.76), h));
+      g.push(paint(lining([[0.075, HEAD_C - 0.2], [0.09, HEAD_C - 0.12], [0.098, HEAD_C - 0.02], [0.094, HEAD_C + 0.04]], 14, Math.PI * 0.62, Math.PI * 0.76), shade(h, 0.7)));
+      for (const sd of [-1, 1]) g.push(paint(at(pill(0.03, 0.16, 0.05), sd * 0.083 * w, HEAD_C - 0.06, 0.03, 0, 0, sd * 0.05), h));
+      fringe(HEAD_C + 0.065, 0.084, 3, 0.09, 0.04);
+      break;
+    case 3: // bun
+      g.push(shell(h, p, 0.52));
+      crown(-0.005);
+      g.push(paint(at(sphere(0.04, 10, 8), 0, HEAD_C + 0.085, -0.075), h));
+      fringe(HEAD_C + 0.062, 0.084, 2, 0.08, 0.03);
+      break;
+    case 4: // bald on top: a short horseshoe of hair round the back and sides
+      g.push(paint(at(torus(0.081, 0.016, Math.PI * 1.25, 16), 0, HEAD_C + 0.005, -0.004, Math.PI / 2, 0, -Math.PI * 0.125 - Math.PI / 2, w, 1.12, 1), h));
+      break;
+    case 5: // bob: a shell to the jaw, open at the face, with straight bangs
+      g.push(shell(h, p, 0.78, { phi0: Math.PI * 0.27, phiLen: Math.PI * 1.46, grow: 1.12, tilt: -0.05 }));
+      g.push(shell(h, p, 0.36, { grow: 1.12, tilt: -0.05 }));
+      g.push(paint(at(pill(0.13 * w, 0.03, 0.03), 0, HEAD_C + 0.06, 0.08, 0, 0, Math.PI / 2), h));
+      break;
+    case 6: // ponytail
+      g.push(shell(h, p, 0.52));
+      g.push(paint(at(torus(0.012, 0.005), 0, HEAD_C + 0.04, -0.108, 0.3, 0, 0), '#7c4a5a'));
+      g.push(paint(at(capsule(0.024, 0.13, 3, 8), 0, HEAD_C - 0.04, -0.125, 0.25, 0, 0, 1, 1, 0.85), h));
+      fringe(HEAD_C + 0.064, 0.084, 3, 0.09, 0.035);
+      break;
+    case 7: // twin tails
+      g.push(shell(h, p, 0.52));
+      for (const sd of [-1, 1]) g.push(paint(at(capsule(0.022, 0.12, 3, 8), sd * 0.1 * w, HEAD_C - 0.04, -0.045, 0.15, 0, sd * 0.3), h));
+      fringe(HEAD_C + 0.064, 0.084, 3, 0.1, 0.035);
+      break;
+    default: // 8: side part, combed over with a lifted front
+      g.push(shell(h, p, 0.5, { tilt: -0.18 }));
+      crown(0.005);
+      g.push(paint(at(sphere(0.06, 12, 8), (v > 3 ? 1 : -1) * 0.02 * w, HEAD_C + 0.078, 0.045, 0.35, 0, (v > 3 ? -1 : 1) * 0.3, 1.3, 0.5, 1.1), h));
   }
-  if (o.tie) {
-    parts.push(clothPanel([[-0.025, 0.496], [0.025, 0.496], [0.014, 0.451], [-0.015, 0.451]], 0.18, o.tie));
-    parts.push(clothPanel([[-0.013, 0.45], [0.013, 0.45], [0.027, 0.298], [0, 0.271], [-0.025, 0.298]], 0.182, shade(o.tie, 0.94)));
+}
+
+function headwear(g: THREE.BufferGeometry[], a: Avatar, p: Persona): void {
+  const w = p.face.width;
+  switch (a.headwear) {
+    case 1: { // chef's toque: a fitted band and a soft, pleated crown
+      const band = '#f1ede4';
+      g.push(paint(at(lathe([[0.096, 0], [0.099, 0.035], [0.098, 0.045]], 20), 0, HEAD_C + 0.045, -0.006, -0.12, 0, 0, w * 0.84, 1, 1), band));
+      g.push(paint(at(lathe([[0.096, 0.04], [0.108, 0.09], [0.112, 0.13], [0.104, 0.16], [0.07, 0.172], [0, 0.175]], 20), 0, HEAD_C + 0.045, -0.006, -0.12, 0, 0, w * 0.86, 1, 1), '#faf8f3'));
+      break;
+    }
+    case 2: // hachimaki headband with knotted tails
+      g.push(paint(at(lathe([[0.1, 0], [0.102, 0.01], [0.1, 0.022]], 20), 0, HEAD_C + 0.03, -0.006, -0.2, 0, 0, 0.8 * w * 1.04, 1, 1.02), '#ebe3d2'));
+      g.push(paint(at(new THREE.CircleGeometry(0.007, sg(10)), 0, HEAD_C + 0.055, 0.103, -0.2), '#a8483d'));
+      for (const sd of [-1, 1]) g.push(paint(at(pill(0.012, 0.05, 0.004), sd * 0.01, HEAD_C + 0.0, -0.104, 0.3, 0, sd * 0.4), '#ddd3bf'));
+      break;
+    case 3: { // baseball cap
+      const c = a.shirt === '#ffffff' ? '#a8483d' : shade(a.shirt, 0.85);
+      g.push(shell(c, p, 0.47, { grow: 1.14, tilt: -0.05, dy: 0.01 }));
+      g.push(paint(at(cyl(0.065, 0.068, 0.006, 16), 0, HEAD_C + 0.05, 0.085, 0.18, 0, 0, w, 1, 0.9), shade(c, 0.85)));
+      break;
+    }
+  }
+}
+
+function buildEyes(): Part[] {
+  const g: THREE.BufferGeometry[] = [];
+  for (const sd of [-1, 1]) {
+    g.push(paint(at(sphere(0.012, 10, 8), sd * 0.031, EYE_Y, 0.083, 0, sd * 0.25, 0, 1.3, 0.72, 0.5), '#efe8de'));
+    g.push(paint(at(sphere(0.0085, 8, 6), sd * 0.031, EYE_Y - 0.001, 0.0875, 0, sd * 0.25, 0, 1, 1.05, 0.5), '#241c1a'));
+    g.push(paint(at(capsule(0.0022, 0.022, 2, 5), sd * 0.031, EYE_Y + 0.0085, 0.089, 0.1, sd * 0.25, Math.PI / 2, 1, 1, 0.6), '#3a2c28')); // upper lash line
+  }
+  return [[merge(g), B.Eyes]];
+}
+// (the far LOD keeps the eyes too: they are what makes a face read at street distance)
+
+// ---------------------------------------------------------------- torso & garments
+// Body cross-sections are ellipses: lathe profiles scaled in depth. Garment layers sit a few mm outside each other.
+const D_CHEST = 0.64, D_HIP = 0.74;
+const SHIRT: [number, number][] = [[0.132, 1.0], [0.134, 1.06], [0.146, 1.16], [0.163, 1.26], [0.172, 1.325], [0.17, 1.365], [0.158, 1.398], [0.136, 1.424], [0.104, 1.443], [0.068, 1.457], [0.05, 1.462]];
+const JACKET: [number, number][] = [[0.146, 1.0], [0.148, 1.07], [0.158, 1.16], [0.174, 1.26], [0.184, 1.33], [0.182, 1.37], [0.17, 1.402], [0.148, 1.428], [0.114, 1.447], [0.078, 1.461], [0.058, 1.466]];
+const PANTS: [number, number][] = [[0.0005, 0.86], [0.1, 0.862], [0.145, 0.885], [0.16, 0.93], [0.152, 0.99], [0.137, 1.045]];
+const JACKET_SKIRT: [number, number][] = [[0.162, 0.83], [0.166, 0.9], [0.158, 0.98], [0.15, 1.045]];
+
+function el(pts: [number, number][], depth: number, color: string, seg = 22, scaleX = 1): THREE.BufferGeometry {
+  return paint(at(lathe(pts, seg), 0, 0, 0, 0, 0, 0, scaleX, 1, depth), color);
+}
+const frontZ = (r: number, depth: number) => r * depth; // front surface depth of an elliptical layer
+
+function buildTorso(a: Avatar, o: Outfit, p: Persona): Part[] {
+  const chest: THREE.BufferGeometry[] = [], hips: THREE.BufferGeometry[] = [];
+  const cut = o.cut ?? (o.apron === true ? 'coat' : undefined);
+  const bx = p.build;
+  const outer = cut === 'blazer' || cut === 'workwear' || cut === 'longcoat' ? o.vest ?? shade(a.shirt, 0.7) : a.shirt;
+  const trim = o.trim ?? shade(outer, 1.25);
+  // trousers seat (a skirt replaces it below)
+  if (o.skirt) {
+    hips.push(paint(at(lathe([[0.0005, 0.6], [0.2, 0.6], [0.205, 0.63], [0.17, 0.82], [0.152, 0.95], [0.137, 1.045]], 18), 0, 0, 0, 0, 0, 0, bx, 1, D_HIP + 0.04), o.skirt));
+    hips.push(paint(at(lathe([[0.199, 0.598], [0.2, 0.612]], 18), 0, 0, 0, 0, 0, 0, bx, 1, D_HIP + 0.05), shade(o.skirt, 0.8)));
+  } else hips.push(el(PANTS, D_HIP, a.pants, 16, bx));
+  // belt (only shows over a tucked-in shirt)
+  if (!FAR && (!cut || cut === undefined) && !o.skirt) hips.push(paint(at(torus(0.139, 0.008, Math.PI * 2, 18), 0, 1.01, 0, Math.PI / 2, 0, 0, bx, D_HIP + 0.03, 1), '#2a2321'));
+
+  if (cut === 'blazer' || cut === 'longcoat') {
+    chest.push(el(JACKET, D_CHEST + 0.02, outer, 16, bx));
+    // the V opening: shirt, tie, lapels
+    const z = frontZ(0.178, D_CHEST + 0.02);
+    chest.push(panel([[-0.05, 1.44], [0.05, 1.44], [0.0, 1.2]], z - 0.004, a.shirt));
+    if (o.tie) {
+      chest.push(panel([[-0.012, 1.43], [0.012, 1.43], [0.008, 1.41], [-0.008, 1.41]], z, shade(o.tie, 0.9)));
+      chest.push(panel([[-0.008, 1.41], [0.008, 1.41], [0.019, 1.22], [0, 1.2], [-0.019, 1.22]], z, o.tie));
+    }
+    for (const sd of [-1, 1]) {
+      chest.push(panel([[sd * 0.052, 1.445], [sd * 0.088, 1.42], [sd * 0.082, 1.36], [sd * 0.1, 1.34], [sd * 0.004, 1.185]].map(([x, y]) => [x, y]) as [number, number][], z + 0.001, shade(outer, 1.1)));
+    }
+    if (!FAR) for (const y of [1.14, 1.08]) chest.push(paint(at(sphere(0.007, 6, 4), 0.01, y, frontZ(0.15, D_CHEST + 0.02) + 0.004), shade(outer, 0.6)));
+    if (cut === 'blazer') hips.push(el(JACKET_SKIRT, D_HIP + 0.03, outer, 16, bx));
+    else {
+      // knee-length overcoat, buttoned, with a centre-front seam
+      const pts: [number, number][] = [[0.0005, 0.555], [0.196, 0.555], [0.2, 0.57], [0.19, 0.7], [0.172, 0.86], [0.163, 0.96], [0.152, 1.045]];
+      hips.push(paint(at(lathe(pts, 18), 0, 0, 0, 0, 0, 0, bx, 1, D_HIP + 0.05), outer));
+      hips.push(panel([[-0.003, 1.0], [0.003, 1.0], [0.003, 0.57], [-0.003, 0.57]], frontZ(0.19, D_HIP + 0.05) - 0.004, shade(outer, 0.7), 0.003));
+      if (!FAR) chest.push(paint(at(torus(0.135, 0.012, Math.PI * 2, 18), 0, 1.06, 0, Math.PI / 2, 0, 0, bx, D_CHEST + 0.1, 1), shade(outer, 0.85))); // belt tie
+    }
+  } else if (cut === 'coat') {
+    // chef whites / work coat: double-breasted, stand collar, to the hip
+    chest.push(el(JACKET, D_CHEST + 0.02, a.shirt, 16, bx));
+    hips.push(el(JACKET_SKIRT, D_HIP + 0.03, a.shirt, 16, bx));
+    const z = frontZ(0.17, D_CHEST + 0.02);
+    chest.push(panel([[-0.02, 1.43], [0.12, 1.36], [0.115, 1.06], [0.0, 1.06]], z, shade(a.shirt, 0.97)));
+    chest.push(paint(at(lathe([[0.062, 1.452], [0.06, 1.485]], 16), 0, 0, 0, 0, 0, 0, 1, 1, 0.85), shade(a.shirt, 0.94)));
+    if (!FAR) for (const y of [1.33, 1.24, 1.15]) for (const x of [0.03, 0.095]) chest.push(paint(at(sphere(0.0075, 6, 4), x, y, z + 0.007), trim));
+  } else if (cut === 'workwear') {
+    // zip jacket / school jacket: closed, stand collar, zip or button line
+    chest.push(el(JACKET, D_CHEST + 0.02, outer, 16, bx));
+    hips.push(el([[0.152, 0.94], [0.155, 0.99], [0.148, 1.045]], D_HIP + 0.03, outer, 16, bx));
+    chest.push(paint(at(lathe([[0.066, 1.45], [0.064, 1.49]], 16), 0, 0, 0, 0, 0, 0, 1, 1, 0.85), shade(outer, 0.9)));
+    const z = frontZ(0.176, D_CHEST + 0.02);
+    chest.push(panel([[-0.004, 1.45], [0.004, 1.45], [0.004, 1.0], [-0.004, 1.0]], z, trim, 0.003));
+    if (!FAR) for (const sd of [-1, 1]) chest.push(panel([[sd * 0.06, 1.17], [sd * 0.12, 1.17], [sd * 0.12, 1.12], [sd * 0.06, 1.12]], frontZ(0.15, D_CHEST + 0.02), shade(outer, 0.85), 0.003));
+  } else if (cut === 'knit') {
+    const knit = a.shirt;
+    chest.push(el(JACKET, D_CHEST + 0.015, knit, 16, bx));
+    hips.push(el([[0.15, 0.95], [0.153, 0.99], [0.147, 1.045]], D_HIP + 0.025, knit, 16, bx));
+    chest.push(paint(at(torus(0.062, 0.01, Math.PI * 2, 16), 0, 1.452, 0, Math.PI / 2, 0, 0, 1, 0.85, 1), o.trim ?? shade(knit, 0.85)));
+    hips.push(paint(at(lathe([[0.154, 0.94], [0.156, 0.965]], 16), 0, 0, 0, 0, 0, 0, bx, 1, D_HIP + 0.035), o.trim ?? shade(knit, 0.85)));
+    if (o.trim && !FAR) chest.push(paint(at(lathe([[0.168, 1.25], [0.172, 1.28]], 16), 0, 0, 0, 0, 0, 0, bx, 1, D_CHEST + 0.03), o.trim));
+  } else {
+    // plain shirt, tucked in, with collar points and a button placket
+    chest.push(el(SHIRT, D_CHEST, a.shirt, 16, bx));
+    const z = frontZ(0.17, D_CHEST);
+    for (const sd of [-1, 1]) chest.push(panel([[sd * 0.012, 1.455], [sd * 0.062, 1.445], [sd * 0.042, 1.405]], z - 0.006, shade(a.shirt, 0.94)));
+    if (!FAR) for (const y of [1.36, 1.27, 1.18, 1.09]) chest.push(paint(at(sphere(0.005, 5, 4), 0, y, frontZ(y > 1.2 ? 0.168 : 0.145, D_CHEST) + 0.003), shade(a.shirt, 0.75)));
+    if (o.vest) {
+      // waistcoat over the shirt
+      chest.push(el([[0.142, 1.0], [0.144, 1.07], [0.155, 1.16], [0.169, 1.26], [0.174, 1.32], [0.15, 1.38]], D_CHEST + 0.03, o.vest, 16, bx));
+      chest.push(panel([[-0.03, 1.39], [0.03, 1.39], [0.0, 1.22]], frontZ(0.168, D_CHEST + 0.03), a.shirt));
+      if (o.tie) chest.push(panel([[-0.008, 1.43], [0.008, 1.43], [0.016, 1.24], [0, 1.22], [-0.016, 1.24]], frontZ(0.168, D_CHEST + 0.03) + 0.002, o.tie));
+      if (!FAR) for (const y of [1.18, 1.12, 1.06]) chest.push(paint(at(sphere(0.006, 5, 4), 0, y, frontZ(0.15, D_CHEST + 0.03) + 0.004), '#b89656'));
+    } else if (o.tie) chest.push(panel([[-0.008, 1.44], [0.008, 1.44], [0.017, 1.22], [0, 1.2], [-0.017, 1.22]], z + 0.001, o.tie));
   }
   if (o.apron) {
-    const apron = typeof o.apron === 'string' ? o.apron : UNIFORMS[a.uniformStyle ?? 0] ?? UNIFORMS[0];
-    const seam = o.trim ?? shade(apron, 1.48);
-    parts.push(clothPanel([[-0.085, 0.374], [0.085, 0.374], [0.106, 0.254], [0.155, 0.209], [0.152, -0.106], [0.113, -0.125], [-0.131, -0.116], [-0.157, -0.094], [-0.154, 0.209], [-0.104, 0.26]], 0.176, apron));
-    parts.push(clothPanel([[-0.151, 0.221], [0.151, 0.221], [0.15, 0.202], [-0.15, 0.202]], 0.191, seam));
-    for (const side of [-1, 1]) {
-      parts.push(paint(at(capsule(0.013, 0.138, 2, 5), side * 0.106, 0.441, 0.136, -0.29, 0, side * -0.55, 1.02, 1, 0.51), apron));
-      parts.push(paint(at(capsule(0.008, 0.19, 2, 5), side * 0.159, 0.214, 0.05, Math.PI / 2, 0, 0), seam));
-    }
-    if (!FAR) {
-      parts.push(clothPanel([[0.015, 0.119], [0.117, 0.119], [0.116, 0.056], [0.097, 0.033], [0.033, 0.033], [0.016, 0.055]], 0.190, shade(apron, 0.79)));
-      parts.push(clothPanel([[0.017, 0.117], [0.116, 0.117], [0.115, 0.107], [0.018, 0.107]], 0.201, seam));
-      parts.push(clothPanel([[-0.062, 0.335], [-0.034, 0.335], [-0.034, 0.304], [-0.062, 0.304]], 0.191, '#b59a68'));
-    }
+    // bib apron: bib on the chest, skirt from the waist to the knee (curved, so legs swing behind it)
+    const ap = typeof o.apron === 'string' ? o.apron : UNIFORMS[a.uniformStyle ?? 0] ?? UNIFORMS[0];
+    const seam = o.trim ?? shade(ap, 1.4);
+    const zb = frontZ(0.17, D_CHEST + 0.03);
+    chest.push(panel([[-0.075, 1.33], [0.075, 1.33], [0.095, 1.2], [0.12, 1.04], [-0.12, 1.04], [-0.095, 1.2]], zb, ap));
+    for (const sd of [-1, 1]) chest.push(paint(at(pill(0.012, 0.13, 0.004), sd * 0.065, 1.4, frontZ(0.16, D_CHEST + 0.03) - 0.01, -0.35, 0, sd * -0.12), ap));
+    const skirt: [number, number][] = [[0.205, 0.56], [0.19, 0.7], [0.172, 0.86], [0.16, 0.98], [0.157, 1.04]];
+    hips.push(paint(at(lathe(skirt, 14, -1.05, 2.1), 0, 0, 0, 0, 0, 0, bx, 1, D_HIP + 0.1), ap));
+    hips.push(paint(at(lining(skirt, 14, -1.05, 2.1), 0, 0, 0, 0, 0, 0, bx, 1, D_HIP + 0.1), shade(ap, 0.7)));
+    hips.push(paint(at(torus(0.16, 0.007, Math.PI * 2, 18), 0, 1.03, 0, Math.PI / 2, 0, 0, bx, D_HIP + 0.1, 1), seam)); // waist tie
+    if (!FAR) chest.push(panel([[-0.045, 1.24], [0.045, 1.24], [0.045, 1.17], [-0.045, 1.17]], zb + 0.006, shade(ap, 0.85), 0.003));
   }
   if (o.bag) {
-    parts.push(paint(at(capsule(0.13, 0.12, 2, 8), 0, 0.3, -0.2, 0, 0, 0, 1.1, 1, 0.55), o.bag));
-    parts.push(paint(at(box(0.16, 0.08, 0.04), 0, 0.22, -0.27), shade(o.bag, 0.8)));
-    for (const sx of [-1, 1]) parts.push(paint(at(torus(0.15, 0.014, Math.PI), sx * 0.11, 0.38, -0.03, 0, Math.PI / 2, 0, 1, 1.05, 1), shade(o.bag, 0.7)));
-  }
-  return merge(parts);
-}
-
-function buildArm(a: Avatar, o: Outfit, side: 1 | -1): THREE.BufferGeometry {
-  // pivot at the shoulder; hangs down -y. Tapered sleeve, cuff, mitten hand with a thumb nub.
-  const cut = workCut(o);
-  const sleeve = cut === 'blazer' || cut === 'workwear' ? o.vest ?? a.shirt : a.shirt;
-  const cuff = cut === 'blazer' ? a.shirt : o.trim ?? shade(sleeve, 0.80);
-  const parts = [
-    paint(sphere(0.078, 8, 6), sleeve),
-    paint(at(lathe([[0.001, -0.31], [0.059, -0.3], [0.069, -0.15], [0.075, 0]], 10), 0, 0, 0), sleeve),
-    paint(at(torus(0.056, 0.012), 0, -0.305, 0, Math.PI / 2, 0, 0), cuff),
-    paint(at(sphere(0.066, 7, 6), 0, -0.37, 0.005, 0, 0, 0, 0.9, 1.05, 0.8), a.skin),
-    paint(at(sphere(0.027, 5, 4), -side * 0.045, -0.35, 0.035), a.skin),
-  ];
-  if (cut === 'knit') {
-    for (const [y, width] of [[-0.24, 0.064], [-0.175, 0.069], [-0.11, 0.072]]) {
-      parts.push(paint(lathe([[width, y], [width + 0.003, y + 0.021]], 10), cuff));
+    // backpack with shoulder straps
+    chest.push(paint(at(pill(0.25, 0.32, 0.12), 0, 1.22, -frontZ(0.17, D_CHEST) - 0.055), o.bag));
+    if (!FAR) chest.push(paint(at(pill(0.17, 0.12, 0.05), 0, 1.13, -frontZ(0.17, D_CHEST) - 0.12), shade(o.bag, 0.85)));
+    // straps come over the shoulders and run down the front of the chest
+    for (const sd of [-1, 1]) {
+      chest.push(paint(at(pill(0.026, 0.25, 0.008), sd * 0.082, 1.3, frontZ(0.17, D_CHEST + 0.04), -0.08, 0, sd * 0.1), shade(o.bag, 0.7)));
+      chest.push(paint(at(pill(0.026, 0.16, 0.008), sd * 0.09, 1.44, 0.0, Math.PI / 2, 0, 0), shade(o.bag, 0.7)));
     }
   }
-  return merge(parts);
+  return [[merge(chest), B.Chest], [merge(hips), B.Body]];
 }
 
-function buildLeg(a: Avatar, p: Persona, o: Outfit): THREE.BufferGeometry {
-  const cut = workCut(o);
-  const shoe = cut === 'blazer' ? '#4c382f' : cut === 'coat' ? '#413a34' : p.shoe;
-  const sole = cut === 'blazer' || cut === 'coat' ? '#2c2727' : p.sole;
-  return merge([
-    paint(lathe([[0.001, -0.41], [0.066, -0.4], [0.07, -0.33], [0.084, -0.12], [0.088, 0.02]], 10), a.pants),
-    paint(at(sphere(0.075, 10, 7), 0, -0.458, 0.03, 0, 0, 0, 0.91, 0.62, 1.58), shoe),
-    paint(at(lathe([[0, -0.502], [0.07, -0.502], [0.074, -0.489], [0.069, -0.477]], 10), 0, 0, 0.035, 0, 0, 0, 0.97, 1, 1.56), sole),
-  ]);
+function sleeveColor(a: Avatar, o: Outfit): string {
+  const cut = o.cut ?? (o.apron === true ? 'coat' : undefined);
+  return cut === 'blazer' || cut === 'workwear' || cut === 'longcoat' ? o.vest ?? shade(a.shirt, 0.7) : a.shirt;
 }
 
-interface Pose {
-  bodyY: number; lean: number; roll: number; twist: number; headX: number; headY: number;
-  armL: [number, number]; armR: [number, number]; legL: number; legR: number;
+function buildArm(a: Avatar, o: Outfit, sd: 1 | -1): Part[] {
+  const x = sd * SHO_X, ex = sd * (SHO_X + 0.012);
+  const sleeve = sleeveColor(a, o);
+  const cut = o.cut;
+  const upper = [
+    // rounded deltoid that melts into the sloping shoulder line, then a tapered upper arm
+    paint(at(sphere(0.05, 16, 12), x - sd * 0.008, SHO_Y - 0.012, 0, 0, 0, sd * 0.35, 0.95, 1.05, 0.98), sleeve),
+    paint(at(lathe([[0.036, ELB_Y - 0.02], [0.039, ELB_Y + 0.05], [0.044, SHO_Y - 0.15], [0.047, SHO_Y - 0.07], [0.045, SHO_Y - 0.02]], 16), x, 0, -0.004), sleeve),
+  ];
+  const wrist = 0.88;
+  const lower = [
+    paint(at(sphere(0.038, 12, 10), ex, ELB_Y, -0.01), sleeve), // elbow
+    paint(at(lathe([[0.029, wrist], [0.032, wrist + 0.05], [0.038, ELB_Y - 0.09], [0.039, ELB_Y - 0.02], [0.037, ELB_Y + 0.01]], 16), ex, 0, -0.01), sleeve),
+  ];
+  // shirt cuff peeking out of a jacket sleeve
+  if (cut === 'blazer' || cut === 'longcoat') lower.push(paint(at(lathe([[0.031, wrist - 0.012], [0.033, wrist + 0.004]], 12), ex, 0, -0.01), a.shirt));
+  else if (cut === 'knit' || cut === 'workwear') lower.push(paint(at(lathe([[0.035, wrist - 0.004], [0.037, wrist + 0.025]], 12), ex, 0, -0.01), o.trim ?? shade(sleeve, 0.85)));
+  // hand: a tapered mitten (palm faces the thigh) with a separate thumb angled forward and in
+  const hx = ex, hy = wrist - 0.045;
+  const mitt = lathe([[0.004, -0.105], [0.017, -0.098], [0.026, -0.075], [0.031, -0.04], [0.031, -0.005], [0.024, 0.02]], 12);
+  lower.push(paint(at(mitt, hx, wrist - 0.01, 0.004, 0.1, 0, 0, 0.6, 1, 1.15), a.skin));
+  lower.push(paint(at(capsule(0.0105, 0.032, 2, 8), hx - sd * 0.013, hy - 0.012, 0.03, 0.55, 0, -sd * 0.35), shade(a.skin, 0.97)));
+  lower.push(paint(at(cyl(0.025, 0.028, 0.03, 12), hx, wrist + 0.005, -0.004, 0, 0, 0, 0.8, 1, 1), a.skin)); // wrist
+  return [[merge(upper), sd < 0 ? B.ArmL : B.ArmR], [merge(lower), sd < 0 ? B.ElbowL : B.ElbowR]];
 }
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
-/** Bones (rigid skinning: every vertex follows exactly one bone). Bind pose has no rotation. */
-const enum B { Body, Chest, Head, Eyes, ArmL, ArmR, LegL, LegR }
-const BIND: [number, number, number][] = [ // model-space bind position of each bone
-  [0, HIP, 0], [0, HIP, 0], [0, HIP + 0.88, 0], [0, HIP + 0.88, 0],
-  [-0.235, HIP + 0.465, 0], [0.235, HIP + 0.465, 0], [-0.1, HIP, 0], [0.1, HIP, 0],
-];
+function buildLeg(a: Avatar, o: Outfit, p: Persona, sd: 1 | -1): Part[] {
+  const x = sd * LEG_X;
+  const fabric = o.skirt ? shade(a.skin, 0.93) : a.pants;
+  const tights = o.skirt ? '#3a3437' : a.pants;
+  const thigh = [
+    paint(at(lathe([[0.058, KNEE - 0.01], [0.064, KNEE + 0.08], [0.076, 0.74], [0.087, 0.86], [0.088, HIP + 0.02]], 12), x, 0, 0, 0, 0, 0, 1, 1, 1.02), o.skirt ? tights : fabric),
+  ];
+  const shin: THREE.BufferGeometry[] = [
+    paint(at(sphere(0.058, 10, 8), x, KNEE, 0.004), o.skirt ? tights : fabric), // knee
+    paint(at(lathe(o.skirt
+      ? [[0.034, 0.08], [0.038, 0.14], [0.05, 0.3], [0.053, 0.38], [0.052, KNEE]]
+      : [[0.055, 0.085], [0.054, 0.12], [0.056, 0.3], [0.058, KNEE]], 12), x, 0, 0.004), tights),
+  ];
+  // shoe: rounded upper on a thin sole, toe forward
+  const cut = o.cut;
+  const shoe = cut === 'blazer' || cut === 'longcoat' ? '#2d2522' : p.shoe;
+  const sole = cut === 'blazer' || cut === 'longcoat' ? '#18120f' : p.sole;
+  shin.push(paint(at(capsule(0.042, 0.15, 3, 10), x, 0.055, 0.045, Math.PI / 2, 0, 0, 1.1, 1, 0.78), shoe));
+  shin.push(paint(at(pill(0.092, 0.024, 0.255), x, 0.012, 0.046, Math.PI / 2, 0, 0, 1, 1, 1), sole));
+  return [[merge(thigh), sd < 0 ? B.LegL : B.LegR], [merge(shin), sd < 0 ? B.KneeL : B.KneeR]];
+}
 
-/** Whole character as ONE indexed geometry with skinIndex/skinWeight (1 draw call, 1 shadow call). */
+/** Whole person as ONE indexed geometry with skinIndex/skinWeight (1 draw call, 1 shadow call). */
+/** Skin tones are pulled a quarter of the way toward a soft neutral: natural under the warm grade, never orange. */
+const naturalSkin = (hex: string) => '#' + new THREE.Color(hex).lerp(new THREE.Color('#c9b5a6'), 0.28).getHexString();
+
 function buildCharacter(a: Avatar, o: Outfit, far: boolean): THREE.BufferGeometry {
-  Q = far ? 0.42 : 0.72; FAR = far;
+  Q = far ? 0.5 : 1; FAR = far;
+  a = { ...a, skin: naturalSkin(a.skin) };
   const p = persona(a);
-  const parts: [THREE.BufferGeometry, B][] = [
-    [buildHead(a, p, o).scale(p.face.width, p.face.height, 1), B.Head],
-    [buildEyes(p).scale(p.face.width, p.face.height, 1), B.Eyes], [buildTorso(a, o), B.Chest],
-    [buildArm(a, o, -1), B.ArmL], [buildArm(a, o, 1), B.ArmR], [buildLeg(a, p, o), B.LegL], [buildLeg(a, p, o), B.LegR],
+  const parts: Part[] = [
+    ...buildHead(a, p, o), ...buildEyes(), ...buildTorso(a, o, p),
+    ...buildArm(a, o, -1), ...buildArm(a, o, 1), ...buildLeg(a, o, p, -1), ...buildLeg(a, o, p, 1),
   ];
   Q = 1; FAR = false;
   const geo = merge(parts.map(([g, b]) => {
-    g.translate(...BIND[b]);
     const n = g.attributes.position.count;
     const idx = new Uint16Array(n * 4), w = new Float32Array(n * 4);
     for (let i = 0; i < n; i++) { idx[i * 4] = b; w[i * 4] = 1; }
@@ -377,6 +450,18 @@ function buildCharacter(a: Avatar, o: Outfit, far: boolean): THREE.BufferGeometr
   return geo;
 }
 
+// ---------------------------------------------------------------- animation
+interface Pose {
+  bodyY: number; lean: number; roll: number; twist: number; spine: number; headX: number; headY: number;
+  /** shoulder [forward swing (−), abduction (+ = away from the body)] */
+  armL: [number, number]; armR: [number, number];
+  elbowL: number; elbowR: number; // − bends the forearm forward
+  legL: number; legR: number; // − swings the thigh forward
+  kneeL: number; kneeR: number; // + bends the shin back
+}
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+const rest = (): Pose => ({ bodyY: 0, lean: 0, roll: 0, twist: 0, spine: 0, headX: 0, headY: 0, armL: [0, 0.06], armR: [0, 0.06], elbowL: -0.14, elbowR: -0.14, legL: 0, legR: 0, kneeL: 0.02, kneeR: 0.02 });
+
 export class Character {
   root = new THREE.Group();
   private mesh: THREE.SkinnedMesh;
@@ -384,39 +469,51 @@ export class Character {
   private near: THREE.BufferGeometry;
   private far: THREE.BufferGeometry | null = null;
   private isFar = false;
-  private pose: Pose = { bodyY: 0, lean: 0, roll: 0, twist: 0, headX: 0, headY: 0, armL: [0, 0], armR: [0, 0], legL: 0, legR: 0 };
+  private pose: Pose = rest();
   private phase = Math.random() * 10;
   private t = Math.random() * 10;
   private blinkIn = 1 + Math.random() * 3;
   private look = { yaw: 0, pitch: 0, next: 1 + Math.random() * 3 };
   anim: Anim = 'idle';
   speed = 0; // m/s, drives the walk cycle
-  /** Attach props here: they ride in front of the chest at hand height (plates, trays). */
+  /** Attach props here: they ride in front of the body at carrying height (plates, trays, bags). */
   readonly hands = new THREE.Group();
   readonly headSlot = new THREE.Group();
+  /** Rides the right hand (chopsticks, phone, camera). */
+  readonly rightGrip = new THREE.Group();
+  bite = 0; // 0 reaches toward the plate, 1 brings the chopsticks to the mouth
+  eatingAtCounter = false;
+  private legK = 1; // leg length factor (children have shorter legs)
+  private relax = Math.random(); // per-person idle stance (how bent the elbows are, how far forward the hands hang)
 
   constructor(public avatar: Avatar, public outfit: Outfit = {}, scale = 1) {
     this.bones = BIND.map(() => new THREE.Bone());
-    const [body, chest, head, eyes, armL, armR, legL, legR] = this.bones;
-    const parentOf = [-1, B.Body, B.Body, B.Head, B.Body, B.Body, B.Body, B.Body];
     this.bones.forEach((bone, i) => {
-      const par = parentOf[i];
+      const par = PARENT[i];
       const [x, y, z] = BIND[i];
       if (par < 0) bone.position.set(x, y, z);
       else { const [px, py, pz] = BIND[par]; bone.position.set(x - px, y - py, z - pz); this.bones[par].add(bone); }
     });
-    void chest; void eyes; void armL; void armR; void legL; void legR;
     this.near = buildCharacter(avatar, outfit, false);
     this.mesh = new THREE.SkinnedMesh(this.near, MAT);
     this.mesh.castShadow = true;
-    this.mesh.add(body);
+    this.mesh.add(this.bones[B.Body]);
     this.mesh.updateMatrixWorld(true);
     this.mesh.bind(new THREE.Skeleton(this.bones)); // bind at the origin, unscaled: root transforms apply on top
-    this.mesh.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.85, 0), 1.15); // skip per-vertex skinned bounds
-    head.add(this.headSlot); this.headSlot.position.y = 0.55;
-    body.add(this.hands); this.hands.position.set(0, 0.42, 0.34);
+    this.mesh.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.9, 0), 1.15); // skip per-vertex skinned bounds
+    this.bones[B.Head].add(this.headSlot); this.headSlot.position.y = 0.3;
+    this.bones[B.Body].add(this.hands); this.hands.position.set(0, 0.2, 0.36);
+    this.bones[B.ElbowR].add(this.rightGrip); this.rightGrip.position.set(-0.012, -0.3, 0.03);
     this.root.add(this.mesh);
     this.root.scale.setScalar(scale);
+    this.proportions();
+  }
+
+  private proportions(): void {
+    const kid = !!this.outfit.child;
+    this.legK = kid ? 0.84 : 1;
+    this.bones[B.Head].scale.setScalar(kid ? 1.32 : 1);
+    for (const b of [B.LegL, B.LegR]) this.bones[b].scale.set(1, this.legK, 1);
   }
 
   setAvatar(a: Avatar, o: Outfit = this.outfit): void {
@@ -425,6 +522,7 @@ export class Character {
     this.near = buildCharacter(a, o, false);
     if (this.isFar) this.far = buildCharacter(a, o, true);
     this.mesh.geometry = this.isFar ? this.far! : this.near;
+    this.proportions();
   }
 
   /** Swap to the low-poly LOD (built lazily on first use). */
@@ -439,83 +537,115 @@ export class Character {
     this.t += dt;
     const sp = this.speed;
     const run = this.anim === 'run';
-    this.phase += dt * (run ? 11.5 : 4 + sp * 2.2);
+    // stride frequency follows speed (≈1.8 strides/s at a 1.4 m/s walk)
+    this.phase += dt * (run ? 10.5 : 3.2 + sp * 2.6);
     const s = Math.sin(this.phase), c = Math.cos(this.phase);
-    const tgt: Pose = { bodyY: 0, lean: 0, roll: 0, twist: 0, headX: 0, headY: 0, armL: [0, 0.07], armR: [0, -0.07], legL: 0, legR: 0 };
-    const breathe = Math.sin(this.t * 2.1) * 0.01;
+    const tgt = rest();
+    const breathe = Math.sin(this.t * 1.9) * 0.004;
     const moving = sp > 0.15;
 
     // idle life: look around and blink
     this.look.next -= dt;
-    if (this.look.next <= 0) { this.look.next = 1.5 + Math.random() * 3.5; this.look.yaw = (Math.random() - 0.5) * 0.9; this.look.pitch = (Math.random() - 0.6) * 0.25; }
+    if (this.look.next <= 0) { this.look.next = 1.5 + Math.random() * 3.5; this.look.yaw = (Math.random() - 0.5) * 0.9; this.look.pitch = (Math.random() - 0.6) * 0.2; }
     this.blinkIn -= dt;
     if (this.blinkIn <= 0) this.blinkIn = 2 + Math.random() * 3.5;
-    this.bones[B.Eyes].scale.y = this.blinkIn < 0.12 ? 0.12 : 1;
+    this.bones[B.Eyes].scale.y = this.blinkIn < 0.12 ? 0.15 : 1;
 
     switch (this.anim) {
       case 'idle': case 'interact': {
-        const shift = Math.sin(this.t * 0.7);
-        tgt.bodyY = breathe; tgt.roll = shift * 0.035; tgt.twist = shift * 0.04;
+        // contrapposto: weight drifts from foot to foot, hips and shoulders counter-rotate
+        const shift = Math.sin(this.t * 0.55);
+        tgt.bodyY = breathe - Math.abs(shift) * 0.006; tgt.roll = shift * 0.025; tgt.twist = shift * 0.03; tgt.spine = -shift * 0.03;
         tgt.headY = this.look.yaw; tgt.headX = this.look.pitch;
-        tgt.armL = [Math.sin(this.t * 1.3) * 0.05, 0.08 + shift * 0.02]; tgt.armR = [-Math.sin(this.t * 1.3) * 0.05, -0.08 + shift * 0.02];
-        tgt.legL = shift * 0.03; tgt.legR = -shift * 0.03;
-        if (this.anim === 'interact') { tgt.armR = [-1.25, -0.12]; tgt.headY = 0; tgt.headX = 0.1; }
+        const sway = Math.sin(this.t * 1.9) * 0.02; // breathing lifts the shoulders a touch
+        tgt.armL = [-0.08 - this.relax * 0.1 + Math.sin(this.t * 1.1) * 0.025 - sway, 0.07 + this.relax * 0.04];
+        tgt.armR = [-0.08 - this.relax * 0.1 - Math.sin(this.t * 1.1) * 0.025 - sway, 0.07 + this.relax * 0.04];
+        tgt.elbowL = -0.28 - this.relax * 0.3; tgt.elbowR = -0.3 - this.relax * 0.25;
+        tgt.kneeL = 0.03 + Math.max(0, shift) * 0.08; tgt.kneeR = 0.03 + Math.max(0, -shift) * 0.08;
+        if (this.anim === 'interact') { tgt.armR = [-0.9, 0.05]; tgt.elbowR = -0.7; tgt.headY = 0; tgt.headX = 0.12; }
         break;
       }
       case 'walk': case 'run': case 'carry': {
         const k = moving ? 1 : 0;
-        const amp = run ? 0.95 : Math.min(0.65, 0.25 + sp * 0.18);
+        const amp = run ? 0.72 : Math.min(0.46, 0.2 + sp * 0.16);
         tgt.legL = s * amp * k; tgt.legR = -s * amp * k;
-        // arms swing in an arc: forward and slightly across the body
-        tgt.armL = [-s * amp * 0.85 * k, 0.1 + Math.max(0, -s) * 0.12 * k]; tgt.armR = [s * amp * 0.85 * k, -0.1 - Math.max(0, s) * 0.12 * k];
-        tgt.bodyY = (Math.abs(c) * (run ? 0.07 : 0.045) - 0.015) * k + breathe; // heel-toe bounce, twice per stride
-        tgt.lean = run ? 0.2 : 0.05 * k;
-        tgt.roll = s * 0.035 * k; tgt.twist = -s * (run ? 0.12 : 0.08) * k;
-        tgt.headY = s * 0.05 * k; tgt.headX = run ? -0.12 : 0;
-        if (this.anim === 'carry') { tgt.armL = [-1.25, 0.28]; tgt.armR = [-1.25, -0.28]; tgt.twist *= 0.3; }
+        // the knee folds while the leg swings through, and stays soft at heel strike
+        tgt.kneeL = (0.08 + Math.max(0, c) * (run ? 1.5 : 0.95) * amp * 1.4) * k + (1 - k) * 0.03;
+        tgt.kneeR = (0.08 + Math.max(0, -c) * (run ? 1.5 : 0.95) * amp * 1.4) * k + (1 - k) * 0.03;
+        // arms counter-swing, forearms trail and swing a little further forward
+        tgt.armL = [-s * amp * 0.75 * k, 0.07]; tgt.armR = [s * amp * 0.75 * k, 0.07];
+        tgt.elbowL = -(run ? 1.4 : 0.18 + Math.max(0, -s) * 0.35 * k); tgt.elbowR = -(run ? 1.4 : 0.18 + Math.max(0, s) * 0.35 * k);
+        tgt.bodyY = (Math.abs(c) * (run ? 0.05 : 0.022) - (run ? 0.04 : 0.014)) * k + breathe; // two bobs per stride
+        tgt.lean = run ? 0.16 : 0.04 * k;
+        tgt.roll = s * 0.02 * k; tgt.twist = -s * (run ? 0.1 : 0.07) * k; tgt.spine = s * (run ? 0.14 : 0.1) * k;
+        tgt.headY = 0; tgt.headX = run ? -0.08 : 0;
+        if (this.anim === 'carry') { tgt.armL = [-0.42, 0.12]; tgt.armR = [-0.42, 0.12]; tgt.elbowL = tgt.elbowR = -1.15; tgt.spine *= 0.3; }
         break;
       }
       case 'jump':
-        tgt.legL = -0.7; tgt.legR = 0.35; tgt.armL = [-2.5, 0.4]; tgt.armR = [-2.5, -0.4]; tgt.lean = -0.05; tgt.headX = -0.15;
+        tgt.legL = -0.6; tgt.legR = 0.2; tgt.kneeL = 1.0; tgt.kneeR = 0.5; tgt.armL = [-1.6, 0.3]; tgt.armR = [-1.6, 0.3]; tgt.elbowL = tgt.elbowR = -0.5;
+        tgt.lean = -0.04; tgt.headX = -0.12;
         break;
       case 'cook': {
-        const chop = Math.sin(this.t * 14);
-        tgt.armL = [-1.1, 0.38]; tgt.armR = [-1.0 + chop * 0.35, -0.3]; tgt.headX = 0.3; tgt.lean = 0.1; tgt.bodyY = breathe + Math.abs(chop) * 0.006;
-        tgt.roll = Math.sin(this.t * 1.5) * 0.02;
+        const chop = Math.sin(this.t * 13);
+        tgt.armL = [-0.55, 0.12]; tgt.elbowL = -1.0; tgt.armR = [-0.5, 0.1]; tgt.elbowR = -1.05 + chop * 0.28;
+        tgt.headX = 0.42; tgt.lean = 0.12; tgt.bodyY = breathe + Math.abs(chop) * 0.003;
+        tgt.roll = Math.sin(this.t * 1.3) * 0.015; tgt.kneeL = tgt.kneeR = 0.06;
         break;
       }
-      case 'sit': case 'eat':
-        tgt.legL = -1.5; tgt.legR = -1.5; tgt.bodyY = -0.06; tgt.armL = [-0.5, 0.1]; tgt.armR = [-0.5, -0.1];
+      case 'sit': case 'eat': case 'sip':
+        tgt.bodyY = -SIT_DROP + breathe;
+        tgt.legL = -1.5; tgt.legR = -1.46; tgt.kneeL = 1.5; tgt.kneeR = 1.42;
+        tgt.armL = [-0.35, 0.1]; tgt.armR = [-0.38, 0.1]; tgt.elbowL = -0.95; tgt.elbowR = -0.9;
         tgt.headY = this.look.yaw * 0.6; tgt.headX = this.look.pitch;
-        if (this.anim === 'eat') { const b = (Math.sin(this.t * 3) + 1) / 2; tgt.armR = [-1.4 - b * 0.9, -0.5 + b * 0.2]; tgt.headX = 0.12 - b * 0.12; tgt.headY = 0; }
+        if (this.anim === 'eat' || this.anim === 'sip') {
+          const lift = this.anim === 'eat' ? this.bite : Math.pow((Math.sin(this.t * 1.8) + 1) / 2, 4);
+          const high = this.anim === 'eat' && this.eatingAtCounter;
+          tgt.armR = [lerp(high ? -0.75 : -0.5, -0.55, lift), lerp(0.12, 0.3, lift)];
+          tgt.elbowR = lerp(high ? -1.2 : -1.0, -2.25, lift);
+          tgt.armL = [high ? -0.7 : -0.45, 0.12]; tgt.elbowL = high ? -1.2 : -1.0;
+          tgt.lean = lerp(high ? 0.18 : 0.14, 0.08, lift); tgt.headX = lerp(0.3, 0.12, lift); tgt.headY = 0;
+        }
+        break;
+      case 'photo':
+        tgt.armR = [-0.75, 0.05]; tgt.elbowR = -1.75; tgt.armL = [-0.7, -0.15]; tgt.elbowL = -1.7; tgt.headX = 0.02;
+        break;
+      case 'phone':
+        tgt.armR = [-0.35, 0.08]; tgt.elbowR = -1.95; tgt.armL = [-0.05, 0.05]; tgt.headX = 0.36; tgt.headY = 0.08; tgt.lean = 0.04;
+        break;
+      case 'vending':
+        tgt.armR = [-1.15 + Math.sin(this.t * 4) * 0.08, 0.05]; tgt.elbowR = -0.25; tgt.headX = 0.1;
         break;
       case 'wave':
-        tgt.armR = [-2.7, -0.4 + Math.sin(this.t * 10) * 0.35]; tgt.bodyY = breathe; tgt.roll = -0.05; tgt.headX = -0.08;
+        tgt.armR = [-0.2, 1.25]; tgt.elbowR = -1.4 + Math.sin(this.t * 9) * 0.35; tgt.roll = -0.03; tgt.headX = -0.06; tgt.bodyY = breathe;
         break;
       case 'cheer':
-        tgt.armL = [-2.8, 0.5]; tgt.armR = [-2.8, -0.5]; tgt.bodyY = Math.abs(Math.sin(this.t * 8)) * 0.12; tgt.headX = -0.2;
+        tgt.armL = [-2.7, 0.35]; tgt.armR = [-2.7, 0.35]; tgt.elbowL = tgt.elbowR = -0.25;
+        tgt.bodyY = Math.abs(Math.sin(this.t * 8)) * 0.07; tgt.kneeL = tgt.kneeR = 0.15; tgt.headX = -0.18;
         break;
-      case 'angry':
-        tgt.armL = [-0.3, 0.6]; tgt.armR = [-0.3, -0.6]; tgt.headX = 0.12; tgt.bodyY = Math.abs(Math.sin(this.t * 12)) * 0.025; tgt.lean = 0.06;
+      case 'angry': // arms folded, impatient weight shifts
+        tgt.armL = [-0.45, -0.05]; tgt.armR = [-0.5, -0.05]; tgt.elbowL = -1.95; tgt.elbowR = -1.85;
+        tgt.headX = 0.1; tgt.roll = Math.sin(this.t * 3) * 0.02; tgt.lean = -0.03;
         break;
     }
     const k = 1 - Math.exp(-dt * 14);
     const p = this.pose;
-    p.bodyY = lerp(p.bodyY, tgt.bodyY, k); p.lean = lerp(p.lean, tgt.lean, k);
-    p.roll = lerp(p.roll, tgt.roll, k); p.twist = lerp(p.twist, tgt.twist, k);
+    for (const key of ['bodyY', 'lean', 'roll', 'twist', 'spine', 'elbowL', 'elbowR', 'legL', 'legR', 'kneeL', 'kneeR'] as const) p[key] = lerp(p[key], tgt[key], k);
     const kh = 1 - Math.exp(-dt * 5); // heads turn more lazily than limbs
     p.headX = lerp(p.headX, tgt.headX, kh); p.headY = lerp(p.headY, tgt.headY, kh);
     p.armL = [lerp(p.armL[0], tgt.armL[0], k), lerp(p.armL[1], tgt.armL[1], k)];
     p.armR = [lerp(p.armR[0], tgt.armR[0], k), lerp(p.armR[1], tgt.armR[1], k)];
-    p.legL = lerp(p.legL, tgt.legL, k); p.legR = lerp(p.legR, tgt.legR, k);
-    const [body, chest, head, , armL, armR, legL, legR] = this.bones;
-    body.position.y = HIP + p.bodyY;
-    body.rotation.set(p.lean, p.twist, p.roll);
-    head.rotation.set(p.headX, p.headY - p.twist * 0.8, -p.roll * 0.6);
-    chest.scale.set(1, 1 + breathe * 1.2, 1);
-    armL.rotation.set(p.armL[0], 0, p.armL[1]);
-    armR.rotation.set(p.armR[0], 0, p.armR[1]);
-    legL.rotation.x = p.legL; legR.rotation.x = p.legR;
+    const bn = this.bones;
+    bn[B.Body].position.y = HIP * this.legK + p.bodyY * (this.anim === 'sit' || this.anim === 'eat' || this.anim === 'sip' ? 1 : this.legK);
+    bn[B.Body].rotation.set(0, p.twist, p.roll);
+    bn[B.Chest].rotation.set(p.lean, p.spine, -p.roll * 0.6);
+    bn[B.Head].rotation.set(p.headX - p.lean * 0.6, p.headY - p.spine * 0.7 - p.twist * 0.5, 0);
+    bn[B.Chest].scale.set(1, 1 + breathe * 0.8, 1);
+    bn[B.ArmL].rotation.set(p.armL[0], 0, -p.armL[1]);
+    bn[B.ArmR].rotation.set(p.armR[0], 0, p.armR[1]);
+    bn[B.ElbowL].rotation.x = p.elbowL; bn[B.ElbowR].rotation.x = p.elbowR;
+    bn[B.LegL].rotation.x = p.legL; bn[B.LegR].rotation.x = p.legR;
+    bn[B.KneeL].rotation.x = p.kneeL; bn[B.KneeR].rotation.x = p.kneeR;
     this.hands.visible = this.hands.children.length > 0;
   }
 

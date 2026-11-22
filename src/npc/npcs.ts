@@ -7,13 +7,14 @@ import { CUSTOMERS, CustomerType, DISTRICTS, PROPERTIES, RECIPES } from '../core
 import * as sim from '../core/sim';
 import { Avatar, Employee, GameState } from '../core/state';
 import { Anim, Character, FACE_STYLE_NAMES, Outfit } from '../engine/character';
+import { World } from '../engine/collision';
 import { makePlate } from '../world/sushi';
-import { DistrictScene, RestaurantSite, Spot } from '../world/types';
+import { DistrictScene, RestaurantSite, Spot, StreetStop } from '../world/types';
 import { Bubble } from './bubble';
 
-export interface OrderView { emoji: string; recipe: string; pieces: number; status: 'ordering' | 'waiting' | 'ready'; patience: number; vip: boolean }
 
-const MAX_CHARS = 70;
+const MAX_CHARS = 96;
+const PED_MIN = 20, PED_MAX = 48; // sidewalk walkers per district (× quality); tuned with scripts/perf.mjs
 const V = (x: number, z: number) => new THREE.Vector3(x, 0, z);
 const vs = (sp: Spot) => V(sp.x, sp.z);
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
@@ -23,6 +24,7 @@ const HAIRS = ['#1b1b1b', '#2b1d14', '#5a3825', '#a0522d', '#d4a373', '#7b7b7b',
 const STREET_COLORS = ['#b75e50', '#367876', '#c2a466', '#5e658e', '#9a5971', '#78937a', '#6686a1', '#b88670'];
 const PANTS = ['#2d3142', '#3d405b', '#5c4b51', '#283845', '#6d6875', '#1e3d59', '#7f8c8d'];
 const STORY_HEIGHT: Record<string, number> = { kenji: 0.9, mika: 0.96, sato: 1.07, ryo: 1.04, aoki: 0.99 };
+const STREET_POSES: Record<StreetStop['kind'], Anim> = { photo: 'photo', phone: 'phone', bench: 'sip', vending: 'vending', browse: 'idle' };
 
 let nextCustomerId = Math.floor(Date.now() % 1e9) * 10; // unique across reloads; never collides with old tickets
 
@@ -88,6 +90,26 @@ function camera(): THREE.Object3D {
   group.add(lens, glass);
   return group;
 }
+
+function drinkCan(): THREE.Object3D {
+  const g = new THREE.Group();
+  const shell = new THREE.Mesh(geo('drink-can', () => new THREE.CylinderGeometry(0.032, 0.032, 0.105, 10)), propMat('#507061'));
+  const rim = new THREE.Mesh(geo('drink-rim', () => new THREE.CylinderGeometry(0.032, 0.032, 0.007, 10)), propMat('#d3cfc0'));
+  rim.position.y = 0.054;
+  g.add(shell, rim);
+  g.rotation.x = Math.PI / 2;
+  return g;
+}
+
+function chopsticks(): THREE.Object3D {
+  const g = new THREE.Group();
+  for (const dir of [-1, 1]) {
+    const stick = accessory('held-chopstick', '#b39062', [0.009, 0.19, 0.009], [dir * 0.012, -0.048, 0.045]);
+    stick.rotation.z = dir * 0.045;
+    g.add(stick);
+  }
+  return g;
+}
 function umbrella(color: string): THREE.Object3D {
   const g = new THREE.Group();
   const canopy = new THREE.Mesh(geo('canopy', () => new THREE.ConeGeometry(0.62, 0.3, 8, 1, true)), propMat(color, { roughness: 0.5, side: THREE.DoubleSide }));
@@ -99,50 +121,52 @@ function umbrella(color: string): THREE.Object3D {
 }
 
 /** Looks per customer type. Returns avatar, outfit and props. */
+const LONG_HAIR = [2, 3, 5, 6];
 function customerLook(type: CustomerType): { a: Avatar; o: Outfit; hand?: THREE.Object3D } {
   const a = baseAvatar();
+  const fem = Math.random() < 0.5;
+  if (fem) a.hairStyle = pick(LONG_HAIR); else a.hairStyle = pick([0, 1, 4, 8, 8]);
   switch (type) {
-    case 'office':
-      a.shirt = pick(['#e6dccb', '#c2ccd0', '#e0c9c2']);
-      a.pants = '#3a4149';
-      a.hairStyle = pick([0, 5, 8]);
-      return { a, o: { cut: 'blazer', vest: pick(['#344354', '#534b47', '#424650']), tie: pick(['#934b48', '#537670', '#826b4b']), glasses: pick(['square', undefined, undefined]) } };
-    case 'student':
-      a.shirt = '#dfd8bd';
-      a.pants = '#323a4c';
-      a.hairStyle = pick([1, 5, 6, 7]);
-      return { a, o: { cut: 'workwear', vest: pick(['#41556b', '#496457', '#685457']), trim: '#aaa388', bag: pick(['#a1664b', '#54677c', '#796e4c']) } };
-    case 'tourist':
+    case 'office': // salaryman / office lady: dark suit, white or pale shirt
+      a.shirt = pick(['#ece8df', '#dfe5e8', '#e9e0d8']);
+      a.pants = pick(['#2e333b', '#3a3f47', '#2b2f38']);
+      return { a, o: { cut: 'blazer', vest: pick(['#2f3742', '#3d3a39', '#353b47', '#23272f']), tie: fem ? undefined : pick(['#7d3f3b', '#3f5f5a', '#6e5a3e', '#3a4867']), skirt: fem && Math.random() < 0.6 ? a.pants : undefined, glasses: pick(['square', undefined, undefined]) } };
+    case 'student': // school uniform: gakuran or blouse + pleated skirt and ribbon, school bag
+      a.pants = '#262b38';
+      if (fem) { a.shirt = '#f1eee6'; return { a, o: { skirt: '#2c3550', tie: '#9a3f3a', bag: pick(['#3b3330', '#55493c']) } }; }
+      a.shirt = '#ece8df'; a.hairStyle = pick([0, 1, 1, 8]);
+      return { a, o: { cut: 'workwear', vest: '#252a36', trim: '#b4975a', bag: pick(['#3b3330', '#55493c', '#3e4a5a']) } };
+    case 'tourist': // backpack, cap, camera
       a.headwear = pick([0, 3, 3]);
-      a.pants = '#ae9676';
-      return { a, o: { cut: 'workwear', vest: pick(['#586f5d', '#aa7551', '#585476']), trim: '#c2aa78', bag: '#5a473a', detail: 'freckles' }, hand: camera() };
+      a.shirt = pick(['#8fa6a0', '#d7b98d', '#a9b6c9', '#c99b86', '#e4dccb']);
+      a.pants = pick(['#a8957a', '#6f7c87', '#8a8676']);
+      return { a, o: { bag: pick(['#5a473a', '#4e5d55', '#6a5444']) }, hand: camera() };
     case 'family':
-      return { a, o: { cut: 'knit', trim: pick(['#bab18b', '#d2af94', '#c8c4b0']) } };
+      a.shirt = pick(['#b8a88e', '#c9a79b', '#9fb0a3', '#c8c1b3']);
+      return { a, o: { cut: 'knit', skirt: fem && Math.random() < 0.5 ? pick(['#6d5a4f', '#4f5866']) : undefined } };
     case 'foodie':
-      a.shirt = pick(['#927350', '#437473', '#795675']);
-      return { a, o: { cut: 'knit', trim: '#d3a67b', detail: pick(['freckles', 'earrings', 'stubble']) } };
-    case 'wealthy':
-      a.shirt = '#e9dfd2';
-      a.pants = '#32343d';
-      a.hairStyle = pick([3, 5, 8]);
-      return { a, o: { cut: 'blazer', vest: pick(['#38453d', '#524252', '#263948']), tie: '#ba8d56', glasses: pick(['round', undefined]), detail: 'earrings' } };
+      a.shirt = pick(['#7f6a55', '#4f6e6c', '#6f5a6b', '#a28e6b']);
+      return { a, o: { cut: Math.random() < 0.5 ? 'knit' : undefined, detail: pick(['stubble', 'earrings', undefined]), glasses: pick(['round', undefined]) } };
+    case 'wealthy': // long camel or charcoal overcoat
+      a.shirt = '#ebe5da';
+      a.pants = '#2b2d33';
+      return { a, o: { cut: 'longcoat', vest: pick(['#a88a66', '#3b3d44', '#5b4a42', '#2f3b38']), glasses: pick(['round', undefined]), detail: fem ? 'earrings' : undefined, skirt: fem && Math.random() < 0.5 ? '#2b2d33' : undefined } };
     case 'influencer':
-      a.shirt = pick(['#c77d83', '#9d6e8a', '#708092']);
-      a.hairStyle = pick([2, 5, 6]);
+      a.shirt = pick(['#d9b3ac', '#b8a3c4', '#a7bccb', '#efe6d8']);
       a.hair = pick(['#c9936c', '#74405a', '#231e21']);
-      return { a, o: { cut: 'knit', trim: '#e7cabd', detail: 'earrings' }, hand: phone() };
+      return { a, o: { skirt: fem ? pick(['#2f2c33', '#8a7a6c']) : undefined, detail: 'earrings' }, hand: phone() };
     case 'critic':
-      a.shirt = '#d7c2ac';
+      a.shirt = '#d9d2c6';
       a.pants = '#383449';
       a.hairStyle = 3;
       a.hair = '#78716d';
       a.faceStyle = 1;
-      return { a, o: { cut: 'blazer', vest: '#48405b', glasses: 'square', detail: 'earrings' }, hand: notepad() };
+      return { a, o: { cut: 'blazer', vest: '#4a4357', glasses: 'square', detail: 'earrings', skirt: '#383449' }, hand: notepad() };
     case 'vip':
-      a.shirt = '#e8dbc4';
-      a.pants = '#3d3c51';
+      a.shirt = '#efe9de';
+      a.pants = '#262832';
       a.hairStyle = 8;
-      return { a, o: { cut: 'blazer', vest: '#422e3e', tie: '#b98a51', glasses: 'round', trim: '#cead70' } };
+      return { a, o: { cut: 'longcoat', vest: '#1f232b', tie: '#8c6b3e', glasses: 'round' } };
   }
 }
 
@@ -151,22 +175,24 @@ type CState = 'arrive' | 'queue' | 'toSpot' | 'waiting' | 'eating' | 'leave';
 
 interface Cust {
   id: number; type: CustomerType; siteId: string; char: Character; bubble: Bubble; child?: Character;
-  order: { recipe: string; pieces: number }; vip: boolean; tutorial: boolean;
+  order: { recipe: string; pieces: number }; vip: boolean;
   state: CState; path: THREE.Vector3[]; exit: THREE.Vector3[]; speed: number;
   joinT: number; patience: number; ticketId: number | null;
   seat: number; stand: number; orderTimer: number; eatT: number; reactT: number; reactText: string | null;
-  claimed: boolean; fade: number; faceYaw: number | null; sitting: boolean; plate: THREE.Object3D | null;
-  stack: number; stackT: number; // kaiten: empty plates piling up while eating
+  claimed: boolean; fade: number; scale: number; faceYaw: number | null; plate: THREE.Object3D | null;
+  meal: { sticks: THREE.Object3D; food: THREE.Object3D[]; bite: number; interval: number; stack: number } | null;
+  carryProp?: THREE.Object3D;
 }
 
 interface SiteRT {
   site: RestaurantSite; queue: Cust[]; seats: (Cust | null)[]; stand: (Cust | null)[]; standSpots: Spot[];
-  spawnAcc: number; tutorialCd: number; plates: Map<number, THREE.Object3D>; plateKey: string;
+  spawnAcc: number; plates: Map<number, THREE.Object3D>; plateKey: string;
 }
 
 interface Staff {
   e: Employee; key: string; siteId: string; char: Character; home: Spot;
   path: THREE.Vector3[]; target: Cust | null; ticketId: number | null; plate: THREE.Object3D | null; timer: number; anim: Anim;
+  enter?: THREE.Vector3[]; // new hire / transfer: walking in from the street to the station
 }
 
 interface Rider {
@@ -174,7 +200,24 @@ interface Rider {
   path: THREE.Vector3[]; exit: THREE.Vector3[]; park: THREE.Vector3; pickup: Spot; t: number;
 }
 
-interface Ped { char: Character; lane: THREE.Vector3[]; t: number; dir: number; speed: number; umbrella: THREE.Object3D | null; wantsUmbrella: boolean }
+interface StreetRoutine {
+  stop: StreetStop;
+  laneIndex: number;
+  phase: 'walking' | 'headingBack' | 'approach' | 'stopped' | 'return';
+  path: THREE.Vector3[];
+  time: number;
+  prop: THREE.Object3D | null;
+}
+interface Ped {
+  char: Character; lane: THREE.Vector3[]; t: number; dir: number; speed: number;
+  umbrella: THREE.Object3D | null; wantsUmbrella: boolean; routine: StreetRoutine | null;
+  cur: number; // speed actually walked this step (followers match it)
+  jit: number; slot: number; // lateral place on the sidewalk: personal jitter + side-by-side slot in a group
+  lead: Ped | null; lag: number; // group member: walks beside its leader, lag metres behind
+  pause: number; stopT: number; stopAnim: Anim; phone: THREE.Object3D | null; // solo walkers stop now and then
+}
+/** Japan walks on the left: each direction keeps to its own band of the sidewalk, so oncoming walkers pass cleanly. */
+const BAND = 0.3;
 interface Story { char: Character; spot: Spot; wave: number; near: boolean }
 
 // ---------------------------------------------------------------- manager
@@ -191,13 +234,15 @@ export class NPCManager {
   private frameNo = 0;
   private chopT = 0;
   private playerPos = new THREE.Vector3();
+  private posted = new Set<string>(); // `${employee id}:${restaurant}` already on screen (district load = everyone)
+  private live = false; // set after the constructor's first refresh: later newcomers walk in
 
   constructor(scene: THREE.Scene, private d: DistrictScene, s: GameState) {
     scene.add(this.group);
     this.lanes = d.walkPaths.filter((p) => p.length > 1).map((p) => densify(p, 1));
     for (const site of d.sites) this.sites.set(site.id, {
-      site, queue: [], seats: site.seats.map(() => null), standSpots: standSpots(site), stand: [], spawnAcc: Math.random(),
-      tutorialCd: 1.5, plates: new Map(), plateKey: '',
+      site, queue: [], seats: site.seats.map(() => null), standSpots: standSpots(site), stand: [], spawnAcc: rnd(0.75, 1),
+      plates: new Map(), plateKey: '',
     });
     for (const rt of this.sites.values()) rt.stand = rt.standSpots.map(() => null);
     this.spawnPeds(s);
@@ -210,9 +255,13 @@ export class NPCManager {
     }
     this.unsub.push(on('customerLeft', (e) => {
       const c = this.customers.find((x) => x.id === e.customerId);
-      if (c && c.state !== 'leave') this.leave(c, e.reason === 'patience' ? '💢' : e.reason === 'nostock' ? '😞 Sold out!' : '🌙');
+      if (c && c.state !== 'leave') {
+        const line = e.reason === 'patience' ? 'I have to go.' : 'I’ll come back tomorrow.';
+        this.leave(c, line);
+      }
     }));
     this.refresh(s);
+    this.live = true;
   }
 
   private charCount(): number { return this.customers.length + this.customers.filter((c) => c.child).length + this.peds.length + this.staff.length + this.story.length + this.riders.length; }
@@ -221,33 +270,148 @@ export class NPCManager {
   private spawnPeds(s: GameState): void {
     if (!this.lanes.length) return;
     const q = s.settings.quality === 'low' ? 0.5 : s.settings.quality === 'medium' ? 0.75 : 1;
-    const n = Math.round(Math.max(12, Math.min(30, 10 + DISTRICTS[this.d.id].traffic * 3.5)) * q);
+    const n = Math.round(Math.max(PED_MIN, Math.min(PED_MAX, 14 + DISTRICTS[this.d.id].traffic * 4.5)) * q);
+    const world = new World();
+    world.colliders = this.d.colliders;
     for (let i = 0; i < n; i++) {
-      const lane = pick(this.lanes);
-      const type = pick(['office', 'student', 'tourist', 'family', 'foodie', 'wealthy'] as CustomerType[]);
+      const stop = this.d.streetStops[i];
+      const route = stop && streetAccess(this.lanes, stop, world);
+      const lane = route?.lane ?? pick(this.lanes);
+      const type = stop?.kind === 'photo' ? 'tourist' : pick(['office', 'student', 'family', 'foodie', 'wealthy'] as CustomerType[]);
       const look = customerLook(type);
       const ch = new Character(look.a, look.o, rnd(0.91, 1.07));
-      if (look.hand) ch.hands.add(look.hand);
+      const prop = stop?.kind === 'photo' ? look.hand ?? camera()
+        : stop?.kind === 'phone' ? phone() : stop?.kind === 'bench' ? drinkCan() : null;
+      if (prop) {
+        if (stop.kind === 'phone') { prop.position.set(0, -0.018, 0.015); prop.rotation.x = 0.9; }
+        if (stop.kind === 'photo') prop.rotation.x = 2.38;
+        ch.rightGrip.add(prop);
+      }
+      const routine: StreetRoutine | null = stop && route ? {
+        stop, laneIndex: route.i, phase: 'stopped', path: [], time: rnd(6, 15), prop,
+      } : null;
+      if (routine) {
+        ch.root.position.copy(vs(stop.spot));
+        ch.root.rotation.y = stop.spot.yaw;
+      } else if (prop) prop.visible = false;
       this.group.add(ch.root);
-      this.peds.push({ char: ch, lane, t: Math.random() * lane.length, dir: Math.random() < 0.5 ? 1 : -1, speed: rnd(0.9, 1.6), umbrella: null, wantsUmbrella: Math.random() < 0.7 });
+      const t = routine ? routine.laneIndex : Math.random() * lane.length;
+      // a quarter of the walkers come in pairs, a few in threes (families more often); groups stroll slower
+      const size = stop || i + 1 >= n ? 1 : type === 'family' ? (Math.random() < 0.5 ? 3 : 2) : Math.random() < 0.08 ? 3 : Math.random() < 0.27 ? 2 : 1;
+      const lead: Ped = {
+        char: ch, lane, t, dir: Math.random() < 0.5 ? 1 : -1, speed: size > 1 ? rnd(0.85, 1.2) : rnd(1.0, 1.7),
+        umbrella: null, wantsUmbrella: Math.random() < 0.7, routine, cur: 0, jit: routine ? 0 : rnd(-0.12, 0.12), // routine walkers must pass within ~0.45 m of their lane point
+        slot: size === 2 ? -0.26 : 0, lead: null, lag: 0, pause: routine || size > 1 ? Infinity : rnd(8, 50), stopT: 0, stopAnim: 'idle', phone: null,
+      };
+      if (lead.pause < Infinity && Math.random() < 0.4) { lead.phone = phone(); lead.phone.position.set(0, -0.018, 0.015); lead.phone.rotation.x = 0.9; lead.phone.visible = false; ch.rightGrip.add(lead.phone); }
+      this.peds.push(lead);
+      for (let k = 1; k < size; k++, i++) {
+        const lk = customerLook(type);
+        const fc = new Character(lk.a, lk.o, rnd(0.91, 1.07));
+        this.group.add(fc.root);
+        this.peds.push({ ...lead, char: fc, umbrella: null, wantsUmbrella: lead.wantsUmbrella, routine: null, lead, lag: rnd(-0.1, 0.35),
+          slot: size === 2 ? 0.26 : k === 1 ? 0.5 : -0.5, pause: Infinity, phone: null });
+      }
     }
   }
 
   private updatePeds(dt: number, rain: boolean, animate: (ch: Character, dt: number) => void): void {
+    // walkers on the lanes, bucketed per lane: spacing checks only look at people on the same lane
+    const onLane = new Map<THREE.Vector3[], Ped[]>();
     for (const p of this.peds) {
-      const L = p.lane.length;
-      p.t = (p.t + p.dir * p.speed * dt + L) % L;
-      const i = Math.floor(p.t), f = p.t - i;
-      const a = p.lane[i], b = p.lane[(i + 1) % L];
-      p.char.root.position.set(a.x + (b.x - a.x) * f, 0, a.z + (b.z - a.z) * f);
-      const dx = (b.x - a.x) * p.dir, dz = (b.z - a.z) * p.dir;
-      if (dx * dx + dz * dz > 1e-6) p.char.root.rotation.y = turn(p.char.root.rotation.y, Math.atan2(dx, dz), dt * 8);
-      p.char.anim = 'walk'; p.char.speed = p.speed;
+      if (p.routine && p.routine.phase !== 'walking' && p.routine.phase !== 'headingBack') continue;
+      const l = onLane.get(p.lane); if (l) l.push(p); else onLane.set(p.lane, [p]);
+    }
+    for (const p of this.peds) {
+      const stopped = p.routine && this.updateStreetStop(p, p.routine, dt, rain);
+      if (!stopped) this.walkPed(p, dt, onLane.get(p.lane) ?? []);
       const want = rain && p.wantsUmbrella;
       if (want && !p.umbrella) { p.umbrella = umbrella(pick(STREET_COLORS)); p.char.headSlot.add(p.umbrella); }
       if (p.umbrella) p.umbrella.visible = want;
       animate(p.char, dt);
     }
+  }
+
+  private walkPed(p: Ped, dt: number, mates: Ped[]): void {
+    const L = p.lane.length, ch = p.char;
+    let speed = p.speed;
+    if (p.lead) { // group member: matches the leader's pace, beside it
+      p.dir = p.lead.dir; speed = p.lead.cur;
+      p.t = (p.lead.t - p.dir * p.lag + L) % L;
+    } else {
+      if (p.stopT > 0) { // a short stop: look in a window, check the phone
+        p.stopT -= dt; speed = 0;
+        if (p.stopT <= 0) { p.pause = rnd(20, 60); if (p.phone) p.phone.visible = false; }
+      } else if ((p.pause -= dt) <= 0) {
+        p.stopT = rnd(3, 7); speed = 0;
+        p.stopAnim = p.phone && Math.random() < 0.7 ? 'phone' : 'idle';
+        if (p.phone) p.phone.visible = p.stopAnim === 'phone';
+      }
+      // keep a gap behind a slower walker ahead in the same band (same lane only: ~a dozen checks, not n²)
+      for (const o of mates) {
+        if (speed === 0) break;
+        if (o === p || o.lead === p || o.dir !== p.dir) continue;
+        const gap = (((o.t - p.t) * p.dir) % L + L) % L;
+        if (gap > 0.05 && gap < 1.4 && Math.abs(o.jit + o.slot - p.jit - p.slot) < 0.45) speed = Math.min(speed, gap < 0.9 ? o.cur * 0.6 : o.cur);
+      }
+      p.t = (p.t + p.dir * speed * dt + L) % L;
+    }
+    p.cur = speed;
+    const i = Math.floor(p.t), f = p.t - i;
+    const a = p.lane[i], b = p.lane[(i + 1) % L];
+    const len = Math.hypot(b.x - a.x, b.z - a.z) || 1, ux = (b.x - a.x) / len, uz = (b.z - a.z) / len;
+    const side = p.dir * BAND + p.jit + p.slot * p.dir; // left of the walker: (uz, -ux) × dir
+    ch.root.position.set(a.x + (b.x - a.x) * f + uz * side, 0, a.z + (b.z - a.z) * f - ux * side);
+    let yaw = Math.atan2(ux * p.dir, uz * p.dir);
+    if (speed < 0.05) yaw = p.lead ? Math.atan2(p.lead.char.root.position.x - ch.root.position.x, p.lead.char.root.position.z - ch.root.position.z)
+      : Math.atan2(uz * p.dir, -ux * p.dir); // stopped: turn toward the shopfronts on the walker's side
+    ch.root.rotation.y = turn(ch.root.rotation.y, yaw, dt * 8);
+    ch.anim = speed >= 0.05 ? 'walk' : p.lead ? 'idle' : p.stopAnim; ch.speed = speed;
+  }
+
+  private updateStreetStop(p: Ped, r: StreetRoutine, dt: number, rain: boolean): boolean {
+    const { spot, approach, kind } = r.stop;
+    const ch = p.char;
+    const shelterNeeded = rain && (kind === 'photo' || kind === 'bench');
+    const onLane = p.lane[r.laneIndex];
+    if (r.phase === 'walking') {
+      r.time -= dt;
+      if (r.time <= 0) { p.dir *= -1; r.phase = 'headingBack'; }
+      return false;
+    }
+    if (r.phase === 'headingBack') {
+      if (ch.root.position.distanceToSquared(onLane) > 0.20) return false;
+      if (shelterNeeded) { r.phase = 'walking'; r.time = rnd(12, 20); return false; }
+      r.phase = 'approach';
+      r.path = [vs(approach), vs(spot)];
+    }
+    if (r.phase === 'stopped') {
+      r.time -= dt;
+      if (r.time > 0 && !shelterNeeded) {
+        ch.root.rotation.y = turn(ch.root.rotation.y, spot.yaw, dt * 8);
+        ch.speed = 0;
+        ch.anim = kind === 'photo' && r.time % 4 > 2.7 ? 'idle' : STREET_POSES[kind];
+        if (r.prop) r.prop.visible = ch.anim !== 'idle';
+        return true;
+      }
+      r.phase = 'return';
+      r.path = [vs(approach), onLane];
+    }
+    if (r.prop) r.prop.visible = false;
+    ch.anim = 'walk';
+    ch.speed = p.speed;
+    if (walk(ch.root, r.path, p.speed, dt)) {
+      if (r.phase === 'approach') {
+        r.phase = 'stopped';
+        r.time = rnd(8, 16);
+      } else {
+        p.t = r.laneIndex;
+        p.dir *= -1;
+        r.phase = 'walking';
+        r.time = rnd(12, 20);
+      }
+    }
+    return true;
   }
 
   // ------------------------------------------------------------ staff
@@ -267,13 +431,14 @@ export class NPCManager {
       let o: Outfit = {};
       if (e.role === 'chef') { a.shirt = r.uniform; a.headwear = 1; o = { cut: 'coat', apron: '#344654', trim: '#b9ad91' }; }
       else if (e.role === 'server') { a.shirt = r.uniform; a.headwear = 0; o = { vest: '#4d4339', apron: '#6e503f', trim: '#ac8d6b' }; }
-      else if (e.role === 'cleaner') { a.shirt = '#799b91'; a.headwear = 3; o = { cut: 'workwear', vest: '#49685d', trim: '#92ab90' }; }
       else { a.shirt = '#e9dfce'; a.pants = '#3e4149'; o = { cut: 'blazer', vest: '#393f4c', tie: '#944e42', glasses: 'square' }; }
       const ch = new Character(a, o);
       if (e.role === 'manager') ch.hands.add(clipboard());
       this.group.add(ch.root);
-      this.staff.push({ e, key, siteId: e.restaurant!, char: ch, home: site.cleaner, path: [], target: null, ticketId: null, plate: null, timer: rnd(0, 3), anim: 'idle' });
+      const fresh = this.live && !this.posted.has(`${e.id}:${e.restaurant}`); // hire/transfer, not a uniform/concept rebuild
+      this.staff.push({ e, key, siteId: e.restaurant!, char: ch, home: site.cleaner, path: [], target: null, ticketId: null, plate: null, timer: rnd(0, 3), anim: 'idle', enter: fresh ? [] : undefined });
     }
+    this.posted = new Set(want.map((e) => `${e.id}:${e.restaurant}`));
     // home spots by index within role
     for (const rt of this.sites.values()) {
       const at = this.staff.filter((x) => x.siteId === rt.site.id);
@@ -290,8 +455,15 @@ export class NPCManager {
       srv.forEach((x, i) => { x.home = rt.site.servers[i % rt.site.servers.length]; x.char.root.userData.hidden = i >= rt.site.servers.length; });
       for (const x of at) {
         if (x.e.role === 'manager') x.home = rt.site.manager;
-        if (x.e.role === 'cleaner') x.home = rt.site.cleaner;
-        if (!x.path.length && !x.target) { x.char.root.position.set(x.home.x, 0, x.home.z); x.char.root.rotation.y = x.home.yaw; }
+        if (x.enter && !x.enter.length) { // newcomer: from the sidewalk, through the door, down the aisle to the station
+          if (x.char.root.userData.hidden) x.enter = undefined;
+          else {
+            const door = vs(rt.site.door);
+            x.enter = [...this.routes(door, 6).inR, ...(rt.site.queue[0] ? [vs(rt.site.queue[0])] : []), vs(x.home)];
+            x.char.root.position.copy(x.enter.shift()!);
+          }
+        }
+        if (!x.path.length && !x.target && !x.enter) { x.char.root.position.set(x.home.x, 0, x.home.z); x.char.root.rotation.y = x.home.yaw; }
       }
     }
   }
@@ -303,21 +475,18 @@ export class NPCManager {
       const r = s.restaurants[st.siteId];
       if (!r) continue;
       const root = st.char.root;
+      if (st.enter) {
+        if (!walk(root, st.enter, 1.6, dt)) { st.char.anim = 'walk'; st.char.speed = 1.6; animate(st.char, dt); continue; }
+        st.enter = undefined; // arrived: normal duties from this frame on
+      }
       let anim: Anim = 'idle';
       if (st.e.role === 'chef') {
         root.position.set(st.home.x, 0, st.home.z);
         root.rotation.y = turn(root.rotation.y, st.home.yaw, dt * 6);
-        if (r.orders.some((t) => t.cook === 'kitchen')) {
+        if (r.orders.length) {
           anim = 'cook';
           if (root.position.distanceTo(this.playerPos) < 5) { this.chopT -= dt; if (this.chopT <= 0) { this.chopT = rnd(0.3, 0.5); audio.sfx('chop', 0.25); } }
         }
-      } else if (st.e.role === 'cleaner') {
-        st.timer -= dt;
-        if (st.path.length) { anim = 'walk'; if (walk(root, st.path, 0.9, dt)) st.timer = rnd(2, 4); }
-        else if (st.timer <= 0) {
-          const I = this.sites.get(st.siteId)!.site.interior;
-          st.path = [V(rnd(I.minX + 0.7, I.maxX - 0.7), rnd(I.minZ + 0.7, I.maxZ - 0.7))];
-        } else anim = 'interact';
       } else {
         // server / manager: deliver ready food to waiting customers
         if (st.target) {
@@ -335,7 +504,7 @@ export class NPCManager {
             }
           }
         } else {
-          const job = this.customers.find((c) => c.siteId === st.siteId && !c.claimed && (c.state === 'waiting' || c.state === 'toSpot') && c.ticketId !== null && r.ready.some((t) => t.id === c.ticketId));
+          const job = this.customers.find((c) => c.siteId === st.siteId && !c.claimed && c.state === 'waiting' && c.ticketId !== null && r.ready.some((t) => t.id === c.ticketId));
           if (job) {
             const t = r.ready.find((x) => x.id === job.ticketId)!;
             st.target = job; st.ticketId = job.ticketId; job.claimed = true;
@@ -394,57 +563,54 @@ export class NPCManager {
     return { inR, outR };
   }
 
-  private spawnCustomer(s: GameState, rt: SiteRT, playerPos: THREE.Vector3, near = false): void {
+  private spawnCustomer(s: GameState, rt: SiteRT): void {
     const siteId = rt.site.id;
-    const tutorial = siteId === 'asakusa_stand' && s.tutorial < 4;
-    let type: CustomerType = tutorial ? 'office' : sim.pickCustomerType(s, PROPERTIES[siteId].district, s.minute, siteId);
+    const type = sim.pickCustomerType(s, PROPERTIES[siteId].district, s.minute, siteId);
     const doorV = vs(rt.site.door);
-    if (type === 'vip' && doorV.distanceTo(playerPos) > 30) type = 'tourist';
-    let order = sim.makeOrder(s, siteId, type);
-    if (tutorial) order = { recipe: sim.canMake(s, 'salmon_nigiri', 2) || !s.recipes.includes('cucumber_maki') ? 'salmon_nigiri' : 'cucumber_maki', pieces: 2 };
+    const order = sim.makeOrder(s, siteId, type);
     if (!order) return;
     const look = customerLook(type);
     const ch = new Character(look.a, look.o, rnd(0.93, 1.06));
     if (look.hand) ch.hands.add(look.hand);
     const bubble = new Bubble();
     ch.root.add(bubble.group);
-    const { inR, outR } = this.routes(doorV, near ? 5 : 22);
+    const { inR, outR } = this.routes(doorV, 11);
     ch.root.position.copy(inR[0]);
     this.group.add(ch.root);
     const c: Cust = {
-      id: nextCustomerId++, type, siteId, char: ch, bubble, order, vip: type === 'vip', tutorial,
+      id: nextCustomerId++, type, siteId, char: ch, bubble, order, vip: type === 'vip',
       state: 'arrive', path: inR.slice(1), exit: outR, speed: rnd(1.3, 1.7),
-      joinT: 0, patience: this.patienceFor(s, siteId, type) * (tutorial ? 4 : 1), ticketId: null,
-      seat: -1, stand: -1, orderTimer: 0, eatT: 0, reactT: 0, reactText: null, claimed: false, fade: 0, faceYaw: null, sitting: false, plate: null, stack: 0, stackT: 0,
+      joinT: 0, patience: this.patienceFor(s, siteId, type), ticketId: null,
+      seat: -1, stand: -1, orderTimer: 0, eatT: 0, reactT: 0, reactText: null, claimed: false, fade: 0,
+      scale: ch.root.scale.x, faceYaw: null, plate: null, meal: null, carryProp: look.hand,
     };
     if (type === 'family') {
       const ca = baseAvatar(); ca.hairStyle = pick([0, 3]);
-      c.child = new Character({ ...ca, faceStyle: 4 }, { cut: 'knit', bag: pick(STREET_COLORS), trim: '#e0cba3' }, 0.62);
+      c.child = new Character({ ...ca, faceStyle: 4 }, { cut: 'knit', bag: pick(STREET_COLORS), trim: '#e0cba3', child: true });
       c.child.root.position.copy(inR[0]).add(V(0.6, 0.4));
       this.group.add(c.child.root);
     }
-    if (type === 'influencer') c.reactText = '🤳';
     this.customers.push(c);
   }
 
-  private takeOrder(s: GameState, rt: SiteRT, c: Cust): 'took' | 'nostock' {
-    const res = sim.acceptOrder(s, rt.site.id, { ...c.order, type: c.type, customerId: c.id, manualOnly: c.vip || undefined });
-    if (res === 'nostock') {
-      sim.customerLeft(s, rt.site.id, c.type, c.id, 'nostock'); // → bus → this.leave()
-      return 'nostock';
-    }
-    c.ticketId = res.id;
-    rt.queue = rt.queue.filter((x) => x !== c);
-    this.reflowQueue(rt);
+  private takeOrder(s: GameState, rt: SiteRT, c: Cust): 'took' | 'none' {
     const ns = this.activeSeats(s, rt.site.id);
     const seat = concept(s, rt.site.id) === 'kiosk' ? -1 : rt.seats.findIndex((x, i) => i < ns && x === null);
-    if (seat >= 0) { rt.seats[seat] = c; c.seat = seat; const sv = vs(rt.site.seats[seat]); c.path = [aisle(rt.site, sv), sv]; c.faceYaw = rt.site.seats[seat].yaw; }
-    else {
-      let st = rt.stand.findIndex((x) => x === null);
-      if (st < 0) st = Math.floor(Math.random() * rt.stand.length);
-      else rt.stand[st] = c;
-      c.stand = st;
-      const sp = rt.standSpots[st] ?? rt.site.queue[0];
+    const stand = seat < 0 ? rt.stand.indexOf(null) : -1;
+    if (seat < 0 && stand < 0) return 'none';
+    c.ticketId = sim.acceptOrder(s, rt.site.id, { ...c.order, type: c.type, customerId: c.id }).id;
+    rt.queue = rt.queue.filter((x) => x !== c);
+    this.reflowQueue(rt);
+    if (seat >= 0) {
+      rt.seats[seat] = c;
+      c.seat = seat;
+      const sp = rt.site.seats[seat], { approach } = rt.site.dining[seat];
+      c.path = [aisle(rt.site, approach), approach, vs(sp)];
+      c.faceYaw = sp.yaw;
+    } else {
+      rt.stand[stand] = c;
+      c.stand = stand;
+      const sp = rt.standSpots[stand];
       c.path = [vs(sp)]; c.faceYaw = sp.yaw;
     }
     c.state = 'toSpot';
@@ -452,7 +618,16 @@ export class NPCManager {
   }
 
   private reflowQueue(rt: SiteRT): void {
-    rt.queue.forEach((c, i) => { c.path = [vs(rt.site.queue[i])]; c.faceYaw = rt.site.queue[i].yaw; c.orderTimer = 0; });
+    rt.queue.forEach((c, i) => {
+      const spot = rt.site.queue[i];
+      const target = vs(spot);
+      const previous = c.path[c.path.length - 1] ?? c.char.root.position;
+      if (previous.distanceToSquared(target) > 0.001) {
+        c.path = [target];
+        c.orderTimer = 0;
+      }
+      c.faceYaw = spot.yaw;
+    });
   }
 
   private freeSlots(c: Cust): void {
@@ -465,11 +640,13 @@ export class NPCManager {
   }
 
   private leave(c: Cust, reaction: string | null): void {
-    this.freeSlots(c);
-    c.state = 'leave'; c.sitting = false; c.faceYaw = null;
-    const here = c.char.root.position.clone();
     const rt = this.sites.get(c.siteId);
-    c.path = rt ? [aisle(rt.site, here), ...c.exit] : [...c.exit];
+    const here = c.char.root.position;
+    const approach = c.seat >= 0 && rt?.site.dining[c.seat].approach;
+    const exitAisle = approach && (c.state !== 'toSpot' || c.path.length === 1) ? approach : here;
+    this.freeSlots(c);
+    c.state = 'leave'; c.faceYaw = null;
+    c.path = rt ? [...(exitAisle !== here ? [exitAisle] : []), aisle(rt.site, exitAisle), ...c.exit] : [...c.exit];
     if (reaction) { c.reactText = reaction; c.reactT = 2.5; }
   }
 
@@ -480,21 +657,60 @@ export class NPCManager {
     if (!res) return false;
     const p = c.char.root.position;
     emit('money', { amount: res.paid + res.tip, x: p.x, y: 2.2, z: p.z });
-    c.reactText = res.satisfaction > 0.85 ? '😍' : res.satisfaction > 0.7 ? '😊' : res.satisfaction > 0.5 ? '🙂' : '😐';
-    if (res.tip > 1) c.reactText += ' 💰 tip!';
+    c.reactText = res.satisfaction > 0.82 ? 'This looks wonderful.' : res.satisfaction > 0.62 ? 'Thank you!' : 'Thanks.';
     c.reactT = 2.5;
     c.ticketId = null;
-    const cc = concept(s, c.siteId);
-    const plate = cc === 'kiosk' ? takeoutBag() : makePlate(c.order.recipe, c.order.pieces);
-    if (cc !== 'kiosk') plate.scale.setScalar(1.3);
-    c.char.hands.add(plate); c.plate = plate;
     if (c.seat >= 0) {
-      c.state = 'eating'; c.sitting = true;
-      if (cc === 'kaiten') { c.stack = 0; c.stackT = 0; c.eatT = 2 + 1.6 * Math.ceil(c.order.pieces / 2); }
-      else c.eatT = cc === 'omakase' ? rnd(14, 20) : rnd(4, 8);
+      const plate = makePlate(c.order.recipe, c.order.pieces);
+      plate.scale.setScalar(0.72);
+      c.plate = plate;
+      if (c.state === 'waiting') this.startMeal(c, rt, concept(s, c.siteId));
+    } else {
+      c.plate = takeoutBag();
+      if (c.carryProp) c.carryProp.visible = false;
+      c.char.hands.add(c.plate);
+      this.leave(c, null);
     }
-    else { if (c.stand >= 0 && rt.stand[c.stand] === c) rt.stand[c.stand] = null; this.leave(c, null); c.reactT = 2.5; }
     return true;
+  }
+
+  private startMeal(c: Cust, rt: SiteRT, format: string): void {
+    const plate = c.plate!;
+    plate.position.copy(rt.site.dining[c.seat].plate);
+    plate.rotation.y = rt.site.seats[c.seat].yaw;
+    c.char.eatingAtCounter = plate.position.y > 1;
+    this.group.add(plate);
+    const sticks = chopsticks();
+    c.char.rightGrip.add(sticks);
+    if (c.carryProp) c.carryProp.visible = false;
+    const food = plate.children.slice(1);
+    const interval = format === 'omakase' ? Math.max(2.3, 16 / food.length) : rnd(1.6, 2.0);
+    c.meal = { sticks, food, bite: interval * 0.72, interval, stack: 0 };
+    c.eatT = interval * food.length + 3;
+    c.state = 'eating';
+  }
+
+  private eat(c: Cust, dt: number, kaiten: boolean): void {
+    const meal = c.meal!;
+    meal.bite -= dt;
+    if (meal.food.length && meal.bite <= 0) {
+      meal.food.shift()!.visible = false;
+      meal.bite += meal.interval;
+      if (kaiten && meal.food.length > 0 && meal.food.length % 2 === 0) {
+        // Empty plates stay on the table alongside the remaining food.
+        const empty = new THREE.Mesh(EMPTY_PLATE, propMat(pick(['#a63f46', '#426481', '#4a7c70'])));
+        empty.position.set(0.37, 0.018 + meal.stack++ * 0.027, 0);
+        c.plate!.add(empty);
+      }
+    }
+    c.char.bite = Math.max(0, 1 - Math.abs(meal.bite - meal.interval + 0.18) / 0.44);
+    c.eatT -= dt;
+    if (c.eatT > 0) return;
+    meal.sticks.removeFromParent();
+    c.meal = null;
+    c.plate!.removeFromParent();
+    c.plate = null;
+    this.leave(c, null);
   }
 
   private updateCustomers(dt: number, s: GameState, running: boolean, animate: (ch: Character, dt: number) => void): void {
@@ -508,41 +724,32 @@ export class NPCManager {
       if (c.path.length) { moving = !walk(root, c.path, c.speed, dt); }
       if (!c.path.length && c.faceYaw !== null) root.rotation.y = turn(root.rotation.y, c.faceYaw, dt * 8);
 
-      if (running && r && c.state !== 'leave' && c.state !== 'eating' && c.state !== 'arrive') {
-        // a guest whose order the player is cooking right now waits patiently (patience clock frozen)
-        if (c.ticketId !== null && c.ticketId === sim.cookingTicketId) c.joinT += dt;
+      if (running && r && !c.plate && c.state !== 'leave' && c.state !== 'eating' && c.state !== 'arrive') {
         if (s.clock - c.joinT > c.patience) sim.customerLeft(s, c.siteId, c.type, c.id, 'patience');
-        else if (c.ticketId !== null && !r.orders.some((t) => t.id === c.ticketId) && !r.ready.some((t) => t.id === c.ticketId)) this.leave(c, '🤷');
+        else if (c.ticketId !== null && !r.orders.some((t) => t.id === c.ticketId) && !r.ready.some((t) => t.id === c.ticketId)) this.leave(c, 'I’ll try again next time.');
       }
       if (c.state === 'arrive' && !c.path.length) {
         if (!r || !sim.isOpen(s.minute) || rt.queue.length >= rt.site.queue.length) this.leave(c, null);
         else { rt.queue.push(c); c.state = 'queue'; c.joinT = s.clock; this.reflowQueue(rt); }
       }
-      if (c.state === 'queue' && rt.queue[0] === c && !c.path.length && running) {
+      if (c.state === 'queue' && rt.queue[0] === c && !c.path.length && running && r) {
         c.orderTimer += dt;
-        const foh = this.foh(c.siteId);
-        const delay = 2.5 / (1 + 0.3 * (r.upgrades.register ?? 0));
-        if (foh.length && c.orderTimer > delay) this.takeOrder(s, rt, c); // VIP tickets are manualOnly: the player still cooks them
+        // no server or manager: a chef steps over from the kitchen, slower
+        const delay = 2.5 / (1 + 0.3 * (r.upgrades.register ?? 0)) * (this.foh(c.siteId).length ? 1 : 2);
+        if (sim.isAutomated(s, c.siteId) && c.orderTimer > delay) this.takeOrder(s, rt, c);
       }
       if (c.state === 'queue' && running && !sim.isOpen(s.minute)) sim.customerLeft(s, c.siteId, c.type, c.id, 'closed');
-      if (c.state === 'toSpot' && !c.path.length) { c.state = 'waiting'; c.sitting = c.seat >= 0; }
-      if (c.state === 'eating') {
-        c.eatT -= dt;
-        if (c.stackT >= 0 && concept(s, c.siteId) === 'kaiten') {
-          c.stackT += dt;
-          if (c.stackT > 1.6 && c.stack < Math.ceil(c.order.pieces / 2) - 1 && c.plate) {
-            c.stackT = 0; c.stack++;
-            const e = new THREE.Mesh(EMPTY_PLATE, propMat(pick(['#e63946', '#2b5aa8', '#f4a261', '#2a9d8f'])));
-            e.position.y = -0.03 - c.stack * 0.03; c.plate.add(e); // pile grows under the current plate
-          }
-        }
-        if (c.eatT <= 0) { c.plate?.removeFromParent(); c.plate = null; this.leave(c, null); }
+      // no front-of-house to carry it over: the chef hands the food across the counter
+      if (c.state === 'waiting' && running && r && c.ticketId !== null && !this.foh(c.siteId).length && r.ready.some((t) => t.id === c.ticketId)) this.serve(s, c);
+      if (c.state === 'toSpot' && !c.path.length) {
+        c.state = 'waiting';
+        if (c.carryProp && c.seat >= 0) c.carryProp.visible = false;
+        if (c.plate) this.startMeal(c, rt, concept(s, c.siteId));
       }
+      if (c.state === 'eating') this.eat(c, dt, concept(s, c.siteId) === 'kaiten');
       // animation
       let anim: Anim = moving ? 'walk' : 'idle';
-      if (!moving && c.sitting && (c.state === 'waiting' || c.state === 'eating')) anim = c.state === 'eating' ? 'eat' : 'sit';
-      else if (c.state === 'leave' && c.reactT > 0 && c.reactText === '💢') anim = moving ? 'walk' : 'angry';
-      else if (!moving && c.type === 'influencer' && c.state === 'waiting') anim = 'wave';
+      if (!moving && c.seat >= 0 && (c.state === 'waiting' || c.state === 'eating')) anim = c.state === 'eating' && c.eatT > 2.8 ? 'eat' : 'sit';
       if (c.plate && moving && c.state === 'leave') anim = 'carry';
       c.char.anim = anim; c.char.speed = moving ? c.speed : 0;
       // bubble
@@ -551,15 +758,14 @@ export class NPCManager {
       if (!near) c.bubble.set(null);
       else if (c.reactT > 0 && c.reactText) c.bubble.set(c.reactText, null, '#ffd23f');
       else if (c.state === 'queue' && rt.queue[0] === c && !c.path.length) {
-        c.bubble.set(`${c.vip ? '👑' : '🍣'} ${c.order.pieces}× ${RECIPES[c.order.recipe].name}`, 1 - (s.clock - c.joinT) / c.patience, c.vip ? '#c9a227' : '#ff6b6b');
-      } else if ((c.state === 'waiting' || c.state === 'toSpot' || c.state === 'queue') && r) {
-        const ready = c.ticketId !== null && r.ready.some((t) => t.id === c.ticketId);
-        c.bubble.set(ready ? '🔔 Ready!' : c.state === 'queue' ? '…' : `⏳ ${c.order.pieces}× ${RECIPES[c.order.recipe].name}`, 1 - (s.clock - c.joinT) / c.patience, ready ? '#5ad16b' : '#9aa0ad');
+        c.bubble.set(`${c.order.pieces} × ${RECIPES[c.order.recipe].name}, please.`, 1 - (s.clock - c.joinT) / c.patience, c.vip ? '#c9a227' : '#ff6b6b');
+      } else if (c.state === 'waiting' && c.ticketId !== null && r?.ready.some((t) => t.id === c.ticketId)) {
+        c.bubble.set('Order ready', 1 - (s.clock - c.joinT) / c.patience, '#5ad16b');
       } else c.bubble.set(null);
       // despawn
       if (c.state === 'leave' && !c.path.length) { c.fade = -1; }
       const sc = c.fade < 0 ? 0 : Math.min(1, c.fade);
-      root.scale.setScalar(Math.max(0.001, sc));
+      root.scale.setScalar(c.scale * Math.max(0.001, sc));
       if (c.fade < 0) { this.remove(c); continue; }
       animate(c.char, dt);
       if (c.child) {
@@ -570,7 +776,7 @@ export class NPCManager {
         if (cm) walk(ch, [behind], Math.max(c.speed, dd * 2), dt);
         ch.rotation.y = cm ? ch.rotation.y : turn(ch.rotation.y, root.rotation.y, dt * 6);
         ch.scale.setScalar(0.62 * Math.max(0.001, sc));
-        c.child.anim = cm ? 'walk' : anim === 'eat' || anim === 'sit' ? 'idle' : anim === 'angry' ? 'angry' : 'idle';
+        c.child.anim = cm ? 'walk' : 'idle';
         c.child.speed = cm ? 1.5 : 0;
         animate(c.child, dt);
       }
@@ -579,28 +785,23 @@ export class NPCManager {
 
   private remove(c: Cust): void {
     this.freeSlots(c);
+    c.plate?.removeFromParent();
     c.bubble.dispose(); c.char.dispose(); c.child?.dispose();
     this.customers = this.customers.filter((x) => x !== c);
   }
 
-  private updateSpawns(dt: number, s: GameState, playerPos: THREE.Vector3): void {
+  private updateSpawns(dt: number, s: GameState): void {
     const open = sim.isOpen(s.minute);
     for (const rt of this.sites.values()) {
       const id = rt.site.id;
       if (!s.restaurants[id] || !open) continue;
       const here = this.customers.filter((c) => c.siteId === id && c.state !== 'leave');
-      if (id === 'asakusa_stand' && s.tutorial < 4) {
-        if (s.tutorial === 0 || here.length) continue;
-        rt.tutorialCd -= dt;
-        if (rt.tutorialCd <= 0) { rt.tutorialCd = 3; this.spawnCustomer(s, rt, playerPos, true); }
-        continue;
-      }
       rt.spawnAcc += sim.visibleSpawnPerMin(s, id) * dt / 60;
       if (rt.spawnAcc < 1) continue;
       rt.spawnAcc -= 1;
       const cap = rt.site.queue.length + this.activeSeats(s, id) + 3;
       if (here.length >= cap || this.charCount() - this.staff.length >= MAX_CHARS) continue; // staff don't crowd out customers
-      this.spawnCustomer(s, rt, playerPos);
+      this.spawnCustomer(s, rt);
     }
   }
 
@@ -714,7 +915,7 @@ export class NPCManager {
     const noop = () => {};
     for (let i = 0; i < steps; i++) {
       const an = i === steps - 1 ? (ch: Character) => animate(ch, dt) : noop;
-      if (running) this.updateSpawns(h, s, playerPos);
+      if (running) this.updateSpawns(h, s);
       this.updateCustomers(h, s, running, an);
       this.updateStaff(h, s, an);
       this.updatePeds(h, s.event?.id === 'rain', an);
@@ -734,51 +935,6 @@ export class NPCManager {
       animate(st.char, dt);
     }
   }
-
-  /** Prompt text for E at this owned site's counter, or null if nothing to do. */
-  counterPrompt(s: GameState, siteId: string): string | null {
-    const r = s.restaurants[siteId], rt = this.sites.get(siteId);
-    if (!r || !rt) return null;
-    const ready = this.readyCustomers(s, siteId);
-    if (ready.length) return `Serve ${ready.length} order${ready.length > 1 ? 's' : ''}`;
-    const f = rt.queue[0];
-    if (f && !f.path.length) return `Take order: ${f.vip ? '👑 ' : ''}${f.order.pieces}× ${RECIPES[f.order.recipe].name}`;
-    return null;
-  }
-
-  private readyCustomers(s: GameState, siteId: string): Cust[] {
-    const r = s.restaurants[siteId];
-    return this.customers.filter((c) => c.siteId === siteId && c.ticketId !== null && (c.state === 'waiting' || c.state === 'toSpot') && r.ready.some((t) => t.id === c.ticketId));
-  }
-
-  /** Player pressed E at the counter: serve ready food first, else take the front customer's order. */
-  counterAction(s: GameState, siteId: string): 'served' | 'took' | 'nostock' | 'none' {
-    const rt = this.sites.get(siteId);
-    if (!rt || !s.restaurants[siteId]) return 'none';
-    let served = false;
-    for (const c of this.readyCustomers(s, siteId)) {
-      for (const st of this.staff) if (st.target === c) this.dropDelivery(st);
-      served = this.serve(s, c) || served;
-    }
-    if (served) return 'served';
-    const f = rt.queue[0];
-    if (f && !f.path.length) return this.takeOrder(s, rt, f);
-    return 'none';
-  }
-
-  /** Visible orders at a site for the HUD ticket rail. */
-  ordersView(s: GameState, siteId: string): OrderView[] {
-    const r = s.restaurants[siteId];
-    if (!r) return [];
-    return this.customers.filter((c) => c.siteId === siteId && (c.state === 'queue' || c.state === 'toSpot' || c.state === 'waiting')).map((c) => ({
-      emoji: CUSTOMERS[c.type].emoji, recipe: c.order.recipe, pieces: c.order.pieces,
-      status: c.ticketId === null ? 'ordering' : r.ready.some((t) => t.id === c.ticketId) ? 'ready' : 'waiting',
-      patience: Math.max(0, 1 - (s.clock - c.joinT) / c.patience), vip: c.vip,
-    }));
-  }
-
-  /** Force the next customer at this site to arrive quickly (tutorial). */
-  hurryCustomer(siteId: string): void { const rt = this.sites.get(siteId); if (rt) { rt.tutorialCd = 0; rt.spawnAcc = Math.max(rt.spawnAcc, 1); } }
 
   dispose(): void {
     this.unsub.forEach((u) => u());
@@ -837,6 +993,24 @@ function walk(root: THREE.Object3D, path: THREE.Vector3[], speed: number, dt: nu
   }
   root.position.y = 0;
   return path.length === 0;
+}
+
+function streetAccess(lanes: THREE.Vector3[][], stop: StreetStop, world: World): { lane: THREE.Vector3[]; i: number } | undefined {
+  const approach = vs(stop.approach);
+  const sample = new THREE.Vector3();
+  let best = 22 * 22;
+  let route: { lane: THREE.Vector3[]; i: number } | undefined;
+  for (const lane of lanes) lane.forEach((from, i) => {
+    const d2 = approach.distanceToSquared(from);
+    if (d2 >= best) return;
+    const steps = Math.max(1, Math.ceil(Math.sqrt(d2) / 0.3));
+    for (let j = 0; j <= steps; j++) {
+      if (world.overlaps(sample.lerpVectors(from, approach, j / steps), 0.18)) return;
+    }
+    best = d2;
+    route = { lane, i };
+  });
+  return route;
 }
 
 function densify(loop: THREE.Vector3[], spacing: number): THREE.Vector3[] {

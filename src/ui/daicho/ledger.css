@@ -1,114 +1,111 @@
-/* Daichō ledger — washi table, sumi rules, tabular numbers. Narrow pane drops stock/staff via a container query. */
+/* Daichō ledger — chunky washi panel, ink header row, bold area bands, tabular numbers.
+   Narrow pane drops staff (then stars) via a container query. */
 .dc-ledger {
+  --lg-head: 34px; /* thead height: group headers stick right under it */
   container-type: inline-size; color-scheme: light; color: var(--sumi); display: flex; flex-direction: column; min-height: 0; overflow: hidden;
-  background: var(--grain), #fbf6ec; border: 2px solid var(--sumi); border-radius: var(--edge);
-  box-shadow: 0 1px 0 rgba(31, 27, 23, .2), 0 8px 16px -10px rgba(31, 27, 23, .6);
+  background: var(--grain), var(--paper-0); border: var(--bw) solid var(--sumi); border-radius: var(--r-lg); box-shadow: var(--sh-2);
 }
-.dc-lg-top { display: flex; align-items: baseline; gap: 8px; padding: 7px 10px 6px; border-bottom: 2px solid var(--sumi); }
-.dc-lg-title { margin: 0; font: 400 15px var(--display); letter-spacing: .03em; white-space: nowrap; }
-.dc-lg-count { font-size: 12px; color: var(--sumi2); white-space: nowrap; }
-.dc-lg-filter { margin-left: auto; width: 110px; min-width: 0; font: 600 12px var(--body); color: var(--sumi); background: #fffdf7; border: 1.5px solid var(--sumi3); border-radius: 3px; padding: 3px 6px; }
-.dc-lg-filter:focus { border-color: var(--sumi); outline: none; box-shadow: 0 0 0 2px rgba(184, 45, 37, .25); }
+.dc-lg-top {
+  display: flex; align-items: center; gap: var(--s2); min-height: 48px; padding: var(--s2) var(--s3);
+  background: var(--grain), var(--washi2); border-bottom: var(--bw) solid var(--sumi);
+}
+.dc-lg-top > .ico-seal { flex: none; transform: rotate(-5deg); filter: drop-shadow(0 2px 0 rgb(31 27 23 / 30%)); }
+.dc-lg-title { margin: 0; font: 400 17px var(--display); letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.dc-lg-count {
+  flex: none; padding: 2px 9px 3px; font: 900 12px/1.1 var(--body); white-space: nowrap; color: var(--sumi);
+  background: var(--paper-0); border: 2px solid var(--sumi); border-radius: var(--r-pill);
+}
+.dc-lg-count:empty { display: none; }
+.dc-lg-filter {
+  margin-left: auto; width: 120px; min-width: 0; height: 32px; padding: 0 10px; font: 700 13px var(--body); color: var(--sumi);
+  background: var(--paper-0); border: 2px solid var(--sumi); border-radius: var(--r-pill); box-shadow: inset 0 2px 0 rgb(31 27 23 / 10%);
+}
+.dc-lg-filter::placeholder { color: var(--sumi3); }
+.dc-lg-filter:focus-visible { outline: none; border-color: var(--shu); box-shadow: 0 0 0 3px rgb(184 45 37 / 25%); }
 
 .dc-lg-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; }
-.dc-lg-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 12px; line-height: 1.2; }
-.dc-lg-table th, .dc-lg-table td { padding: 4px 3px; white-space: nowrap; text-align: left; }
-.dc-lg-table thead th {
-  position: sticky; top: 0; z-index: 2; background: var(--washi2); border-bottom: 1.5px solid var(--sumi);
-  font-size: 11px; font-weight: 800; color: var(--sumi2); padding-top: 5px; padding-bottom: 5px;
-}
-.dc-lg-sort { all: unset; cursor: pointer; border-radius: 2px; }
-.dc-lg-sort:hover { color: var(--sumi); text-decoration: underline dotted; }
-.dc-lg-sort:focus-visible { outline: 2px dashed var(--shu); outline-offset: 1px; }
-.dc-lg-table th[aria-sort='ascending'] .dc-lg-sort, .dc-lg-table th[aria-sort='descending'] .dc-lg-sort { color: var(--sumi); }
-.dc-lg-table th[aria-sort='ascending'] .dc-lg-sort::after { content: ' ▴'; color: var(--shu); }
-.dc-lg-table th[aria-sort='descending'] .dc-lg-sort::after { content: ' ▾'; color: var(--shu); }
+.dc-lg-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 1.2; }
+.dc-lg-table th, .dc-lg-table td { padding: 5px 4px; white-space: nowrap; text-align: left; }
 
-/* columns */
-.dc-lg-table .lc-sel { padding-left: 7px; }
-/* fixed layout: header widths decide, the name column takes what's left */
-.dc-lg-table thead .lc-sel { width: 24px; } .dc-lg-table thead .lc-band { width: 24px; } .dc-lg-table thead .lc-profit { width: 90px; }
-.dc-lg-table thead .lc-load { width: 66px; } .dc-lg-table thead .lc-stock { width: 40px; } .dc-lg-table thead .lc-stars { width: 30px; }
-.dc-lg-table thead .lc-staff { width: 40px; } .dc-lg-table thead .lc-rules { width: 52px; }
-.dc-lg-table .lc-sel input { margin: 0; width: 13px; height: 13px; accent-color: var(--ai); vertical-align: middle; cursor: pointer; }
-.dc-lg-table .lc-band { text-align: center; }
-.dc-lg-table td.lc-band .dc-band { width: 17px; height: 17px; font-size: 10px; }
-.dc-lg-name { all: unset; display: flex; align-items: center; gap: 5px; max-width: 100%; cursor: pointer; font-weight: 700; border-radius: 2px; }
-.dc-lg-name .t { overflow: hidden; text-overflow: ellipsis; }
-.dc-lg-name:hover .t { text-decoration: underline; text-decoration-color: var(--shu); text-underline-offset: 2px; }
-.dc-lg-name:focus-visible { outline: 2px dashed var(--shu); outline-offset: 1px; }
-.dc-lg-table .lc-profit, .dc-lg-table .lc-load, .dc-lg-table .lc-stock, .dc-lg-table .lc-stars, .dc-lg-table .lc-staff { text-align: right; font-variant-numeric: tabular-nums; }
-.dc-lg-table td.lc-profit .v { font-weight: 800; }
-.dc-lg-table td.lc-profit .v.neg { color: var(--shu); }
-.dc-lg-table td.lc-profit .s { margin-left: 3px; }
-.dc-lg-table td.lc-load { display: table-cell; }
-.dc-lg-load { position: relative; display: inline-block; width: 22px; height: 7px; vertical-align: middle; border: 1.5px solid var(--sumi); border-radius: 1px 3px 2px 2px; background: rgba(31, 27, 23, .08); }
-.dc-lg-load i { display: block; height: 100%; background: var(--dc-good); }
-.dc-lg-load.watch i { background: var(--kin); } .dc-lg-load.act i { background: var(--shu); }
-.dc-lg-load.over { margin-right: 5px; }
-.dc-lg-load.over::after { content: ''; position: absolute; right: -6px; top: -4px; border-left: 5px solid var(--shu); border-top: 6px solid transparent; border-bottom: 6px solid transparent; }
-.dc-lg-table td.lc-load .t { display: inline-block; min-width: 30px; margin-left: 2px; }
-.dc-lg-table td.lc-load .dc-lg-load.over + .t { color: var(--shu); font-weight: 800; }
-.dc-lg-table td.lc-stock.act, .dc-lg-table td.lc-staff.act { color: var(--shu); font-weight: 800; }
-.dc-lg-table td.lc-stock.watch { color: var(--kin2); font-weight: 700; }
-.dc-lg-table .lc-rules { padding-right: 5px; }
-.dc-lg-pol {
-  font: 700 11px var(--body); width: 19px; height: 19px; padding: 0; margin-left: 2px; cursor: pointer; color: var(--sumi2);
-  background: #fffdf7; border: 1.5px solid var(--sumi3); border-radius: 2px 3px 2px 3px;
+/* header row: ink band, washi labels */
+.dc-lg-table thead th {
+  position: sticky; top: 0; z-index: 2; height: var(--lg-head); padding-top: 0; padding-bottom: 0;
+  background: var(--sumi); color: #dccbb0; font-size: 12px; font-weight: 900; letter-spacing: .05em; text-transform: uppercase;
 }
-.dc-lg-pol[aria-pressed='true'] { background: var(--ai); color: var(--washi); border-color: var(--ai2); }
-.dc-lg-pol:disabled { cursor: not-allowed; border-style: dashed; opacity: .45; }
-.dc-lg-pol:hover:not(:disabled) { border-color: var(--sumi); }
-.dc-lg-pol:focus-visible { outline: 2px dashed var(--shu); outline-offset: 1px; }
+.dc-lg-sort { all: unset; display: inline-flex; align-items: center; gap: 2px; min-height: 24px; cursor: pointer; border-radius: var(--r-sm); }
+.dc-lg-sort .ico { width: 13px; height: 13px; }
+.dc-lg-sort:hover { color: var(--washi); }
+.dc-lg-sort:focus-visible { outline: 3px solid var(--kin); outline-offset: 1px; }
+.dc-lg-table th[aria-sort='ascending'] .dc-lg-sort, .dc-lg-table th[aria-sort='descending'] .dc-lg-sort { color: var(--kin); }
+.dc-lg-table th[aria-sort='ascending'] .dc-lg-sort::after { content: '▴'; }
+.dc-lg-table th[aria-sort='descending'] .dc-lg-sort::after { content: '▾'; }
+
+/* columns. Fixed layout: header widths decide, the name column takes what's left */
+.dc-lg-table .lc-band { padding-left: var(--s2); text-align: center; }
+.dc-lg-table thead .lc-band { width: 36px; } .dc-lg-table thead .lc-profit { width: 96px; }
+.dc-lg-table thead .lc-load { width: 74px; } .dc-lg-table thead .lc-stars { width: 38px; }
+.dc-lg-table thead .lc-staff { width: 52px; }
+.dc-lg-table .lc-staff { padding-right: var(--s3); }
+.dc-lg-name { all: unset; display: flex; align-items: center; gap: 6px; max-width: 100%; min-height: 24px; cursor: pointer; font-weight: 800; border-radius: var(--r-sm); }
+.dc-lg-name .t { overflow: hidden; text-overflow: ellipsis; }
+.dc-lg-name .ico-seal { flex: none; margin-left: 2px; transform: rotate(-6deg); }
+.dc-lg-name:hover .t { text-decoration: underline 2px; text-decoration-color: var(--shu); text-underline-offset: 3px; }
+.dc-lg-name:focus-visible { outline: 3px solid var(--focus, var(--kin)); outline-offset: 2px; }
+.dc-lg-table :is(.lc-profit, .lc-load, .lc-stars, .lc-staff) { text-align: right; font-variant-numeric: tabular-nums; }
+.dc-lg-table td.lc-profit .v { font-weight: 900; }
+.dc-lg-table td.lc-profit .v.neg { color: var(--shu2); }
+.dc-lg-table td.lc-profit .s { margin-left: 3px; }
+.dc-lg-table td:is(.lc-stars, .lc-staff) { font-weight: 700; }
+/* load: a chunky little meter */
+.dc-lg-load { position: relative; display: inline-block; width: 26px; height: 10px; vertical-align: middle; border: 2px solid var(--sumi); border-radius: var(--r-pill); background: var(--washi2); overflow: visible; }
+.dc-lg-load i { display: block; height: 100%; background: var(--c-upgrade); border-radius: var(--r-pill); }
+.dc-lg-load.watch i { background: var(--kin); } .dc-lg-load.act i { background: var(--shu); }
+.dc-lg-load.over { margin-right: 6px; }
+.dc-lg-load.over::after { content: ''; position: absolute; right: -8px; top: -5px; border-left: 6px solid var(--shu); border-top: 6px solid transparent; border-bottom: 6px solid transparent; }
+.dc-lg-table td.lc-load .t { display: inline-block; min-width: 34px; margin-left: 2px; font-weight: 700; }
+.dc-lg-table td.lc-load .dc-lg-load.over + .t { color: var(--shu2); font-weight: 900; }
+.dc-lg-table td.lc-staff.act { color: var(--shu2); font-weight: 900; }
 
 /* rows */
-.dc-lg-row td { border-bottom: 1px dotted var(--sumi3); }
+.dc-lg-row td { border-bottom: 2px solid rgb(31 27 23 / 9%); }
 .dc-lg-row { cursor: default; }
-.dc-lg-row:hover, .dc-lg-row.is-hl { background: rgba(201, 154, 60, .2); }
-.dc-lg-row.is-hl td:first-child { box-shadow: inset 3px 0 0 var(--ai); }
-.dc-lg-row.is-sel { background: rgba(35, 56, 92, .1); }
-.dc-lg-row.is-sel.is-hl { background: rgba(35, 56, 92, .18); }
+.dc-lg-row:hover, .dc-lg-row.is-hl { background: var(--c-money-soft); }
+.dc-lg-row.is-hl td:first-child { box-shadow: inset 4px 0 0 var(--kin2); }
 .dc-lg-row:focus { outline: none; }
-.dc-lg-row:focus-visible td { background: rgba(201, 154, 60, .28); }
-.dc-lg-row:focus-visible td:first-child { box-shadow: inset 3px 0 0 var(--shu); }
+.dc-lg-row:focus-visible td { background: var(--c-money-soft); box-shadow: inset 0 2px 0 var(--shu), inset 0 -2px 0 var(--shu); }
+.dc-lg-row:focus-visible td:first-child { box-shadow: inset 4px 0 0 var(--shu), inset 0 2px 0 var(--shu), inset 0 -2px 0 var(--shu); }
 
-/* group header */
+/* group header: a bold area band, coloured edge = worst health in the area */
 .dc-lg-grp th {
-  position: sticky; top: 25px; z-index: 1; padding: 5px 8px 3px; background: var(--grain), #f1e6cf;
-  border-bottom: 1.5px solid var(--sumi); font-size: 12px; font-weight: 800; color: var(--sumi);
+  position: sticky; top: var(--lg-head); z-index: 1; padding: 6px var(--s3) 6px var(--s2); background: var(--grain), var(--washi2);
+  border-top: 2px solid var(--sumi); border-bottom: 2px solid var(--sumi); font-size: 13px; font-weight: 900; color: var(--sumi);
 }
+.dc-lg-grp:has(.dc-band.act) th { background: var(--grain), var(--c-danger-soft); }
+.dc-lg-grp:has(.dc-band.watch) th { background: var(--grain), var(--c-money-soft); }
+tbody:first-of-type .dc-lg-grp th { border-top: 0; }
 /* contain: the spanning header must not widen the data columns (it would starve the name column) */
-.dc-lg-grp th > div { contain: inline-size; display: flex; align-items: center; gap: 5px; min-width: 0; }
+.dc-lg-grp th > div { contain: inline-size; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .dc-lg-grp .nm { overflow: hidden; text-overflow: ellipsis; }
-.dc-lg-grp .dc-band { flex: none; width: 15px; height: 15px; font-size: 9px; }
-.dc-lg-grp .jp { font: 400 13px var(--display); }
-.dc-lg-grp .n { flex: none; margin-left: 2px; color: var(--sumi2); font-weight: 600; }
-.dc-lg-grp .sum { flex: none; margin-left: auto; font-variant-numeric: tabular-nums; }
-.dc-lg-grp .sum.neg { color: var(--shu); }
-
-/* bulk bar */
-.dc-lg-bulk {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 7px 10px; background: var(--grain), var(--washi2);
-  border-top: 2px solid var(--sumi); font-size: 12px; font-weight: 700;
+.dc-lg-grp .jp { font: 400 14px var(--display); }
+.dc-lg-grp .n {
+  flex: none; margin-left: 2px; padding: 0 7px 1px; font-size: 12px; font-weight: 800; color: var(--sumi2);
+  background: var(--paper-0); border: 2px solid rgb(31 27 23 / 25%); border-radius: var(--r-pill);
 }
-.dc-lg-bulk[hidden] { display: none; }
-.dc-lg-bulk .lbl { color: var(--sumi2); margin-left: 4px; }
-.dc-lg-bulk .btn.small { padding: 3px 8px; font-size: 12px; }
-.dc-lg-bulk [data-clear] { margin-left: auto; }
-.dc-lg-bulk .btn.small:disabled { background: var(--grain), #b8ab98; border-color: #9a8e7e; color: #efe7d8; box-shadow: 0 2px 0 #9a8e7e; }
+.dc-lg-grp .sum { flex: none; margin-left: auto; font-variant-numeric: tabular-nums; }
+.dc-lg-grp .sum.neg { color: var(--shu2); }
 
 /* empty */
-.dc-lg-empty { margin: 16px; font-size: 13px; }
-.dc-lg-empty b { font: 400 15px var(--display); }
-.dc-lg-empty p { margin: 6px 0 0; color: var(--sumi2); line-height: 1.45; }
+.dc-lg-empty { margin: var(--s4); font-size: 13px; }
+.dc-lg-empty b { font: 400 16px var(--display); }
+.dc-lg-empty p { margin: var(--s2) 0 0; color: var(--sumi2); line-height: 1.45; }
 
 /* Narrow pane: collapse low-priority columns to width 0 (not display:none, which would break the group header colspan) */
 @container (max-width: 460px) {
-  .dc-lg-table thead .lc-stock, .dc-lg-table thead .lc-staff { width: 0; }
-  .dc-lg-table .lc-stock, .dc-lg-table .lc-staff { padding: 0; overflow: hidden; visibility: hidden; font-size: 0; }
+  .dc-lg-table thead .lc-staff { width: 0; }
+  .dc-lg-table .lc-staff { padding: 0; overflow: hidden; visibility: hidden; font-size: 0; }
 }
 @container (max-width: 360px) {
-  .dc-lg-table thead .lc-stars { width: 0; } .dc-lg-table thead .lc-profit { width: 56px; }
+  .dc-lg-table thead .lc-stars { width: 0; } .dc-lg-table thead .lc-profit { width: 60px; }
   .dc-lg-table .lc-stars { padding: 0; overflow: hidden; visibility: hidden; font-size: 0; }
   .dc-lg-table td.lc-profit .s { display: none; }
 }

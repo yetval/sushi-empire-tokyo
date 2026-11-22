@@ -50,13 +50,16 @@ describe('tycoon: areas, concepts, many restaurants', () => {
     expect(sim.bill(s, 'asakusa_shop', { recipe: 'salmon_nigiri', pieces: 1, manualOnly: false } as any)).toBeGreaterThan(150); // omakase price level > a bar's ¥120
   });
 
-  it('house rules need a manager or research, then auto-hire and auto-price', () => {
+  it('only managed restaurants (manager or ops_center) run themselves', () => {
     s.cash = 1e9; s.lifetime.pieces = 5_000;
     A.buyProperty(s, 'asakusa_shop', 'bar');
-    expect(A.setPolicy(s, 'asakusa_shop', 'autoHire', true)).toMatch(/manager/);
+    const kpi = () => E.restaurantKPIs(s).find((k) => k.id === 'asakusa_shop')!;
+    expect(kpi().managed).toBe(false);
+    expect(kpi().health).toBe('bad'); // no chef
+    for (let h = 0; h < 3; h++) { s.minute = (12 + h) * 60; E.tickEmpire(s); }
+    expect(sim.staffAt(s, 'asakusa_shop', 'chef').length).toBe(0);
     s.research.push('ops_center');
-    expect(A.setPolicy(s, 'asakusa_shop', 'autoHire', true)).toBeNull();
-    expect(A.setPolicy(s, 'asakusa_shop', 'autoPrice', true)).toBeNull();
+    expect(kpi().managed).toBe(true);
     for (let h = 0; h < 6; h++) { s.minute = (12 + h) * 60; E.tickEmpire(s); }
     expect(sim.staffAt(s, 'asakusa_shop', 'chef').length).toBeGreaterThan(0);
     expect(sim.isAutomated(s, 'asakusa_shop')).toBe(true);
@@ -112,19 +115,16 @@ describe('tycoon review A regressions', () => {
   });
 });
 
-describe('tycoon review B regressions', () => {
-  it('restock fix buys only the low ingredients and charges what it shows', () => {
+describe('alerts and health', () => {
+  it('a chef without a server is understaffed: warn health, one-click server hire', () => {
     s.cash = 1e6;
-    E.hireBest(s, 'asakusa_stand', 'chef'); E.hireBest(s, 'asakusa_stand', 'server');
-    for (const k of Object.keys(s.inventory)) (s.inventory as any)[k] = 0;
-    s.inventory.rice = 150; s.inventory.nori = 80; s.inventory.cucumber = 80; // plenty, within storage
-    s.inventory.salmon = 0;
-    const a = E.alerts(s).find((x) => x.id === 'stock')!;
-    expect(a.ingredients).toEqual(['salmon']);
-    const before = s.cash, rice = s.inventory.rice;
+    A.buyProperty(s, 'asakusa_shop', 'bar');
+    E.hireBest(s, 'asakusa_shop', 'chef');
+    const a = E.alerts(s).find((x) => x.id === 'understaffed')!;
+    expect(a.restIds).toContain('asakusa_shop');
+    expect(E.restaurantKPIs(s).find((k) => k.id === 'asakusa_shop')!.health).not.toBe('good');
     expect(E.applyFix(s, a)).toBeNull();
-    expect(Math.abs(before - s.cash - a.fix!.cost)).toBeLessThanOrEqual(2);
-    expect(s.inventory.rice).toBe(rice);
-    expect(E.alerts(s).some((x) => x.id === 'stock')).toBe(false);
+    expect(sim.staffAt(s, 'asakusa_shop', 'server').length).toBe(1);
+    expect(E.alerts(s).some((x) => x.id === 'understaffed' && x.restIds.includes('asakusa_shop'))).toBe(false);
   });
 });

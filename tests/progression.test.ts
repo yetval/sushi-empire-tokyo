@@ -14,7 +14,7 @@ function seeded(seed = 42) {
   let a = seed >>> 0;
   return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
-function hire(st: GameState, role: 'chef' | 'server' | 'cleaner' | 'manager', rest: string | null, skill?: number) {
+function hire(st: GameState, role: 'chef' | 'server' | 'manager', rest: string | null, skill?: number) {
   const c = sim.makeCandidate(st, role); st.candidates.push(c); st.cash += 1e9;
   if (skill) { c.skill = skill; c.wage = wageFor(role, skill); }
   const p = st.lifetime.pieces; st.lifetime.pieces = Math.max(p, 1e5);
@@ -112,12 +112,12 @@ describe('huge numbers', () => {
     expect(sim.nextMilestone(s).pieces).toBe(2.5e15);
     expect(Number.isFinite(s.cash)).toBe(true);
     expect(exact(s.lifetime.pieces)).toBe('1,000,000,000,000,007');
-    expect(short(s.lifetime.pieces)).toBe('1Qa');
+    expect(short(s.lifetime.pieces)).toBe('1\u00a0quad');
   });
 
   it.each([
     [10_000, '10K'], [12_345, '12.3K'], [100_000, '100K'], [1_500_000, '1.5M'], [25_800_000, '25.8M'],
-    [1_200_000_000, '1.2B'], [2.58e16, '25.8Qa'], [-1_500_000, '-1.5M'], [-9_999, '-9,999'], [0, '0'],
+    [1_200_000_000, '1.2B'], [2.58e16, '25.8\u00a0quad'], [-1_500_000, '-1.5M'], [-9_999, '-9,999'], [0, '0'],
   ])('short(%d) = %s', (n, want) => {
     expect(short(n)).toBe(want);
   });
@@ -216,7 +216,7 @@ describe('offline progress', () => {
     expect(A.buyProperty(s, 'ginza_flagship')).toBeNull();
     hire(s, 'chef', 'ginza_flagship', 10); hire(s, 'manager', 'ginza_flagship', 10);
     const g = s.restaurants.ginza_flagship;
-    g.reputation = 0; g.cleanliness = 0; A.setPrice(s, 'ginza_flagship', 2.5);
+    g.reputation = 0; A.setPrice(s, 'ginza_flagship', 2.5);
     for (const secs of [61, 3600, 8 * 3600]) {
       const st = clone(s), cash = st.cash;
       const r = sim.offlineProgress(st, secs);
@@ -231,7 +231,7 @@ describe('end of day', () => {
     s.cash = 1e7; s.lifetime.pieces = 1_000; s.districts.push('shibuya');
     expect(A.buyProperty(s, 'shibuya_crossing')).toBeNull();
     const assigned = [hire(s, 'chef', 'asakusa_stand'), hire(s, 'server', 'shibuya_crossing'), hire(s, 'manager', 'shibuya_crossing')];
-    const benched = [hire(s, 'cleaner', null), hire(s, 'chef', null)];
+    const benched = [hire(s, 'server', null), hire(s, 'chef', null)];
     const expected = assigned.reduce((a, e) => a + e.wage, 0) + benched.reduce((a, e) => a + e.wage / 2, 0)
       + PROPERTIES.asakusa_stand.rent + PROPERTIES.shibuya_crossing.rent;
     const cash = s.cash, expenses = s.lifetime.expenses, todayExp = s.today.expenses;
@@ -240,40 +240,6 @@ describe('end of day', () => {
     expect(s.lifetime.expenses).toBe(expenses + expected);
     expect(s.history.at(-1)!.expenses).toBe(todayExp + expected);
     expect(s.today.expenses).toBe(0);
-  });
-});
-
-describe('inventory under load', () => {
-  it('a big kitchen with almost no stock never drives inventory negative', () => {
-    s.cash = 1e8; s.lifetime.pieces = 1_000;
-    expect(A.buyProperty(s, 'asakusa_house')).toBeNull();
-    for (let i = 0; i < 3; i++) hire(s, 'chef', 'asakusa_house', 10);
-    hire(s, 'server', 'asakusa_house'); hire(s, 'chef', 'asakusa_stand'); hire(s, 'server', 'asakusa_stand');
-    stockUp(s, 1);
-    const lost = s.lifetime.lost;
-    const bad: string[] = [];
-    for (let i = 0; i < 2_000; i++) {
-      if (i % 200 === 0) for (const k of INGREDIENT_IDS) s.inventory[k] += 3; // trickle of stock
-      sim.tick(s, i % 2 ? 5 : 0.05, { activeDistrict: null });
-      for (const k of INGREDIENT_IDS) if (!(s.inventory[k] >= 0 && Number.isInteger(s.inventory[k]))) bad.push(`${i}:${k}=${s.inventory[k]}`);
-    }
-    expect(bad).toEqual([]);
-    expect(s.lifetime.lost).toBeGreaterThan(lost); // stockouts are recorded, not hidden
-  }, 30_000);
-
-  it('over-accepted orders cannot all be cooked from the same stock', () => {
-    for (const k of INGREDIENT_IDS) s.inventory[k] = 0;
-    s.inventory.rice = 2; s.inventory.salmon = 2;
-    const tickets = [];
-    for (let i = 0; i < 5; i++) {
-      const t = sim.acceptOrder(s, 'asakusa_stand', { recipe: 'salmon_nigiri', pieces: 2, type: 'office', customerId: i + 1 });
-      expect(t).not.toBe('nostock'); // stock is checked, not reserved
-      tickets.push(t as Exclude<typeof t, 'nostock'>);
-    }
-    const cooked = tickets.filter((t) => sim.finishManual(s, 'asakusa_stand', t.id, 1)).length;
-    expect(cooked).toBe(1);
-    expect(s.inventory.rice).toBe(0);
-    expect(s.inventory.salmon).toBe(0);
   });
 });
 

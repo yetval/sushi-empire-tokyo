@@ -4,8 +4,9 @@ import { Alert, EmpireTotals, RestKPI, alerts, empireTotals, restaurantKPIs } fr
 import { ConceptId, Region } from '../../core/data';
 import { GameState } from '../../core/state';
 import { UIHost } from '../host';
+import { icon } from '../icons';
 
-export type Overlay = 'profit' | 'load' | 'stock' | 'stars' | 'staff';
+export type Overlay = 'profit' | 'load' | 'stars' | 'staff';
 export type Band = 'good' | 'watch' | 'act';
 
 /** One consistent read of the empire, rebuilt by the shell every SNAP_EVERY seconds (not per frame). */
@@ -29,12 +30,11 @@ export interface StoreState {
   area: string | null; // null = Empire altitude; an area id = City altitude (map zoomed, ledger filtered)
   overlay: Overlay;
   hover: string | null; // restaurant id under pointer/focus (cross-highlight map ⇄ ledger)
-  selected: Set<string>; // ledger bulk selection
 }
 export type StoreKey = keyof StoreState;
 
 export class Store {
-  st: StoreState = { region: 'tokyo', area: null, overlay: 'profit', hover: null, selected: new Set() };
+  st: StoreState = { region: 'tokyo', area: null, overlay: 'profit', hover: null };
   private subs: { keys: StoreKey[] | null; fn: (changed: StoreKey[]) => void }[] = [];
   set(p: Partial<StoreState>): void {
     const changed = (Object.keys(p) as StoreKey[]).filter((k) => p[k] !== this.st[k]);
@@ -42,8 +42,6 @@ export class Store {
     Object.assign(this.st, p);
     for (const s of this.subs) if (!s.keys || s.keys.some((k) => changed.includes(k))) s.fn(changed);
   }
-  /** Selection is a Set: call this after mutating st.selected in place. */
-  touchSelected(): void { for (const s of this.subs) if (!s.keys || s.keys.includes('selected')) s.fn(['selected']); }
   on(keys: StoreKey[] | null, fn: (changed: StoreKey[]) => void): () => void {
     const sub = { keys, fn };
     this.subs.push(sub);
@@ -97,41 +95,44 @@ export function conceptGlyph(c: ConceptId, size = 14, cls = ''): string {
   return `<svg class="dc-glyph ${cls}" width="${size}" height="${size}" viewBox="${-size / 2} ${-size / 2} ${size} ${size}" aria-hidden="true"><path d="${shapePath(CONCEPT_SHAPE[c], r)}"/></svg>`;
 }
 
-/** Health band of one restaurant — the single source of truth for "is this ok?" (map fill, ledger mark, sort). */
+const BAND: Record<RestKPI['health'], Band> = { good: 'good', warn: 'watch', bad: 'act' };
+
+/** Crew that runs the floor: chefs + servers [have, slots]. The optional manager shows as the "managed" seal instead. */
+export const crew = (k: RestKPI): [number, number] => [k.staff.chef[0] + k.staff.server[0], k.staff.chef[1] + k.staff.server[1]];
+
+/** Health band of one restaurant (map fill, ledger mark, sort). The core's k.health is the single source;
+ *  `why` re-reads the same rules from the KPI fields to name the first one that applies. */
 export function health(k: RestKPI): { band: Band; why: string } {
-  const missingChef = k.staff.chef[0] === 0;
-  if (missingChef) return { band: 'act', why: 'No chef' };
-  if (k.stockDays < 0.5) return { band: 'act', why: 'Out of stock soon' };
-  if (k.load > 1.05) return { band: 'act', why: 'Turning guests away' };
-  if (k.profitYesterday !== null && k.profitYesterday < 0) return { band: 'act', why: 'Losing money' };
-  if (k.stockDays < 1.5) return { band: 'watch', why: 'Stock low' };
-  if (k.load > 0.9) return { band: 'watch', why: 'Kitchen near capacity' };
-  if (k.stars < 2.5) return { band: 'watch', why: 'Low rating' };
-  if (k.load < 0.35) return { band: 'watch', why: 'Kitchen idle' };
-  return { band: 'good', why: 'Running well' };
+  const band = BAND[k.health];
+  if (band === 'good') return { band, why: 'Running well' };
+  const why = !k.automated ? 'No chef'
+    : k.profitYesterday !== null && k.profitYesterday < 0 ? 'Losing money'
+      : k.load > 1.25 ? 'Turning guests away'
+        : k.load < 0.45 ? 'Kitchen idle'
+          : k.lostToday > 0.25 * k.guestsToday ? 'Losing guests'
+            : k.staff.server[0] + k.staff.manager[0] === 0 ? 'No server' : 'Needs a look';
+  return { band, why };
 }
 
-/** Band + short label for a map overlay. */
+/** Band + short plain-text label for a map overlay (labels go into SVG <text> and aria-labels, so no markup). */
 export function overlayBand(k: RestKPI, o: Overlay): { band: Band; label: string } {
   switch (o) {
     case 'profit': {
       const p = k.profitYesterday ?? k.revToday;
       return { band: p < 0 ? 'act' : p < 5_000 ? 'watch' : 'good', label: k.profitYesterday === null ? 'new' : `${p < 0 ? '-' : ''}¥${Math.round(Math.abs(p)).toLocaleString('en-US')}` };
     }
-    case 'load': return { band: k.load > 1.05 ? 'act' : k.load > 0.9 || k.load < 0.35 ? 'watch' : 'good', label: `${Math.round(k.load * 100)}%` };
-    case 'stock': return { band: k.stockDays < 0.5 ? 'act' : k.stockDays < 1.5 ? 'watch' : 'good', label: Number.isFinite(k.stockDays) ? `${k.stockDays.toFixed(1)}d` : '—' };
-    case 'stars': return { band: k.stars < 2 ? 'act' : k.stars < 3 ? 'watch' : 'good', label: `★${k.stars.toFixed(1)}` };
+    case 'load': return { band: k.load > 1.25 ? 'act' : k.load > 1 || k.load < 0.45 ? 'watch' : 'good', label: `${Math.round(k.load * 100)}%` };
+    case 'stars': return { band: k.stars < 2 ? 'act' : k.stars < 3 ? 'watch' : 'good', label: `${k.stars.toFixed(1)} stars` };
     case 'staff': {
-      const roles = Object.values(k.staff);
-      const have = roles.reduce((a, r) => a + r[0], 0), slots = roles.reduce((a, r) => a + r[1], 0);
-      return { band: k.staff.chef[0] === 0 ? 'act' : have < slots * 0.6 ? 'watch' : 'good', label: `${have}/${slots}` };
+      const [have, slots] = crew(k);
+      return { band: k.staff.chef[0] === 0 ? 'act' : have < slots ? 'watch' : 'good', label: `${have}/${slots}` };
     }
   }
 }
 
-/** Band marks: text glyph + accessible word, so state never relies on colour alone. */
+/** Band marks: glyph MARKUP (innerHTML only) + accessible word, so state never relies on colour alone. */
 export const BAND_MARK: Record<Band, { glyph: string; word: string }> = {
-  good: { glyph: '◎', word: 'good' }, watch: { glyph: '△', word: 'watch' }, act: { glyph: '✕', word: 'act now' },
+  good: { glyph: '◎', word: 'good' }, watch: { glyph: '△', word: 'watch' }, act: { glyph: icon('close', 10), word: 'act now' },
 };
 
 /** Tiny SVG sparkline (values oldest→newest). Returns '' for < 2 points. Draws a zero line when the series crosses 0. */

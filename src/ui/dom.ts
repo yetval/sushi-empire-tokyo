@@ -2,6 +2,7 @@
 import { audio } from '../audio/audio';
 import { toast } from '../core/bus';
 import { INGREDIENTS } from '../core/data';
+import { icon } from './icons';
 
 export const root = () => document.getElementById('ui-root') ?? document.body;
 
@@ -18,7 +19,7 @@ export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', 
 export function fail(target: Element | null, msg: string): void {
   audio.sfx('error');
   if (target) { target.classList.remove('shake'); void (target as HTMLElement).offsetWidth; target.classList.add('shake'); }
-  toast(msg, 'bad', '❌');
+  toast(msg, 'bad', 'close');
 }
 
 /** Run an action returning an error string (or null). Plays feedback. Returns true on success. */
@@ -28,13 +29,17 @@ export function run(target: Element | null, result: string | null, okSfx: Parame
   return true;
 }
 
+/** Star rating drawn with the hanko star; the number is spoken, the marks are decorative. */
 export const stars = (rep: number) => {
   let h = '';
-  for (let i = 1; i <= 5; i++) h += rep >= i - 0.25 ? '★' : rep >= i - 0.75 ? '<span style="opacity:.6">★</span>' : '<span class="off">★</span>';
-  return `<span class="stars">${h}</span>`;
+  for (let i = 1; i <= 5; i++) h += `<i class="${rep >= i - 0.25 ? '' : rep >= i - 0.75 ? 'half' : 'off'}">${icon('star', 14)}</i>`;
+  return `<span class="stars" title="${rep.toFixed(1)} stars"><span aria-hidden="true">${h}</span><span class="sr-only">${rep.toFixed(1)} stars</span></span>`;
 };
 
 export const bar = (frac: number, cls = '') => `<div class="bar ${cls}"><i style="width:${Math.max(0, Math.min(1, frac)) * 100}%"></i></div>`;
+/** Restaurant health light (RestKPI.health) as a small coloured seal: green good, amber warn, red bad. */
+const HEALTH = { good: ['check', 'healthy'], warn: ['warn', 'needs a look'], bad: ['close', 'in trouble'] } as const;
+export const healthSeal = (h: keyof typeof HEALTH) => `<span class="health ${h}" title="Health: ${HEALTH[h][1]}">${icon(HEALTH[h][0], 14, { title: `Health: ${HEALTH[h][1]}` })}</span>`;
 export const pips = (n: number, max: number) => `<span class="pips">${Array.from({ length: max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</span>`;
 
 /**
@@ -93,5 +98,9 @@ export function patch(container: HTMLElement, html: string, state: { last?: stri
   }
 }
 
-/** Ingredient glyph: a drawn nori sheet for nori (its emoji reads as a placeholder), emoji otherwise. */
-export const ingIcon = (id: string) => (id === 'nori' ? '<i class="nori-sheet" role="img" aria-label="Nori"></i>' : INGREDIENTS[id as keyof typeof INGREDIENTS]?.emoji ?? '');
+/** Ingredient glyph: a drawn nori sheet for nori, its hand-drawn icon otherwise (named for screen readers). */
+export const ingIcon = (id: string) => {
+  if (id === 'nori') return '<i class="nori-sheet" role="img" aria-label="Nori"></i>';
+  const d = INGREDIENTS[id as keyof typeof INGREDIENTS];
+  return d ? icon(d.icon, 16, { title: d.name }) : '';
+};

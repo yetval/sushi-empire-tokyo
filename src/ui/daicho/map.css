@@ -1,105 +1,172 @@
-/* Daichō map pane — washi ward map (Empire) / lot plan (City). */
-.dc-map { display: flex; flex-direction: column; gap: 6px; min-height: 0; min-width: 0; height: 100%; }
-.dc-map-head { display: flex; flex-direction: column; gap: 5px; flex: none; }
-.dc-map-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
-.dc-map-bc { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 14px; white-space: nowrap; overflow: hidden; }
-.dc-map-bc b { font: 400 15px var(--display); letter-spacing: .02em; overflow: hidden; text-overflow: ellipsis; }
-.dc-map-csum { font-size: 12.5px; font-weight: 700; color: var(--sumi2); }
-.dc-map-crumb { font: 700 13px var(--body); color: var(--ai); background: none; border: 0; padding: 2px 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1.5px; }
-.dc-map-crumb:hover { color: var(--sumi); }
+/* Daichō map pane — washi ward map (Empire) / lot plan (City). Chunky warm game UI: foundation tabs, ink-framed
+   washi sheet, sticker pins with a hard ink drop, Dela numerals on wood count stamps. SVG text sizes scale with --ls (set by map.ts fit()) so labels stay >= 12 CSS px. */
+.dc-map { display: flex; flex-direction: column; gap: var(--s2); min-height: 0; min-width: 0; height: 100%; }
+.dc-map-head { display: flex; flex-direction: column; gap: var(--s2); flex: none; }
+.dc-map-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); min-width: 0; }
+.dc-map-bc { display: flex; align-items: center; gap: var(--s2); min-width: 0; font-size: 14px; white-space: nowrap; overflow: hidden; padding: 2px 0 4px 2px; }
+.dc-map-bc > .ico-seal { transform: rotate(-5deg); filter: drop-shadow(0 2px 0 rgba(31, 27, 23, .35)); }
+.dc-map-bc b { font: 400 20px/1.1 var(--display); letter-spacing: .02em; overflow: hidden; text-overflow: ellipsis; }
+.dc-map-bc .sep { font: 900 16px var(--body); color: var(--sumi3); }
+.dc-map-csum { font: 900 13px var(--body); color: var(--sumi2); padding: 2px 10px 3px; background: var(--paper-2); border-radius: var(--r-pill); }
+.dc-map-crumb { font: 900 14px var(--body); color: var(--shu2); background: none; border: 0; padding: 4px 2px; cursor: pointer; text-decoration: underline 2px; text-underline-offset: 4px; text-decoration-color: rgba(156, 34, 25, .4); }
+.dc-map-crumb:hover { color: var(--sumi); text-decoration-color: currentColor; }
 .dc-map .jp { font-family: var(--display); font-weight: 400; }
 
-/* region tabs + overlay segmented control share one paper-chip look */
-.dc-map-tabs, .dc-map-seg { display: flex; border: 1.5px solid var(--sumi); border-radius: 3px 5px 4px 6px / 5px 3px 6px 4px; overflow: hidden; background: #fbf6ec; flex: none; }
-.dc-map-tabs button, .dc-map-seg button { font: 700 12.5px var(--body); color: var(--sumi); background: none; border: 0; border-left: 1px solid rgba(31, 27, 23, .25); padding: 4px 10px; cursor: pointer; line-height: 1.2; }
-.dc-map-tabs button:first-child, .dc-map-seg button:first-child { border-left: 0; }
-.dc-map-tabs button:hover, .dc-map-seg button:hover { background: rgba(31, 27, 23, .07); }
-.dc-map-tabs [aria-selected='true'], .dc-map-seg [aria-pressed='true'] { background: var(--ai); color: var(--washi); }
-.dc-map-tabs .jp { font: 700 11.5px var(--body); }
+/* region + overlay tabs = the foundation .tabs rail. The Daichō sits inside the Manage window, whose .tabs/.tab rules
+   (wood nav) would otherwise win, so the base look is restated at higher specificity here. */
+.dc-map .tabs { flex-direction: row; flex: none; gap: 3px; margin: 0; padding: 3px; overflow: visible; border-width: var(--bw); border-radius: var(--r-lg); background: var(--grain), var(--paper-2); box-shadow: inset 0 3px 0 rgba(31, 27, 23, .12); }
+.dc-map .tabs > .tab {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 3px 12px 5px; text-align: center;
+  font: 900 13.5px/1.1 var(--body); color: var(--sumi2); background: transparent; border: 2px solid transparent; border-radius: var(--r-md);
+  box-shadow: none; transform: none; cursor: pointer; transition: color .15s, background-color .15s;
+}
+.dc-map .tabs > .tab::before { content: none; }
+.dc-map .tabs > .tab:hover:not(.on) { color: var(--ink); background: rgba(252, 247, 236, .6); transform: none; }
+.dc-map .tabs > .tab.on { color: var(--ink); background: var(--grain), var(--paper-0); border-color: var(--ink); box-shadow: inset 0 -3px 0 var(--paper-3), 0 3px 0 var(--ink); transform: none; animation: tab-on .34s var(--ease-pop); }
+.dc-map .tabs > .tab:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+.dc-map .tabs > .tab .jp { font: 400 13px var(--display); }
+.dc-map .tabs > .tab.on .jp { color: var(--ink); }
+.dc-map .tabs > .tab .ico { color: var(--sumi2); }
+.dc-map .tabs > .tab .ico-star path { fill: currentColor; } /* the star is a label here, not a red accent */
+.dc-map .tabs > .tab.on .ico { color: var(--c-money-ink); }
 
-/* legend chip */
-.dc-map-legend { position: relative; flex: none; font-size: 12px; }
-.dc-map-legend summary { list-style: none; display: flex; align-items: center; gap: 3px; cursor: pointer; padding: 3px 8px; border: 1.5px dashed var(--sumi3); border-radius: 3px 5px 4px 6px / 5px 3px 6px 4px; background: #fbf6ec; }
+/* legend: a paper chip that opens a key card */
+.dc-map-legend { position: relative; flex: none; font-size: 13px; }
+.dc-map-legend summary {
+  list-style: none; display: flex; align-items: center; gap: var(--s2); min-height: 32px; padding: 3px 12px 4px; cursor: pointer;
+  background: var(--grain), var(--paper-0); border: 2px solid var(--ink); border-radius: var(--r-pill); box-shadow: 0 3px 0 var(--ink);
+  transition: transform .1s var(--ease-out), box-shadow .1s var(--ease-out);
+}
 .dc-map-legend summary::-webkit-details-marker { display: none; }
-.dc-map-legend summary .marks { margin-left: 4px; font-weight: 700; letter-spacing: 1px; color: var(--sumi2); }
-.dc-map-legend[open] summary { border-style: solid; border-color: var(--sumi); }
-.dc-map-legend-p { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; width: 210px; padding: 8px 10px; display: grid; gap: 3px; background: var(--grain), #fbf6ec; border: 1.5px solid var(--sumi); border-radius: var(--edge); box-shadow: var(--lift); }
-.dc-map-legend-p div { display: flex; align-items: center; gap: 6px; }
-.dc-map-legend-p hr { border: 0; border-top: 1px dashed var(--sumi3); margin: 3px 0; width: 100%; }
-.dc-map-legend-p .sub { color: var(--sumi2); font-size: 11.5px; line-height: 1.3; margin-top: 2px; }
-.dc-map-legend-p .dc-band { width: 16px; height: 16px; font-size: 10px; }
+.dc-map-legend summary:hover { transform: translateY(-1px); box-shadow: 0 4px 0 var(--ink); }
+.dc-map-legend summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.dc-map-legend summary b { font: 900 13px var(--body); }
+.dc-map-legend summary .gl { display: inline-flex; gap: 3px; }
+.dc-map-legend summary .marks { display: inline-flex; gap: 3px; padding-left: var(--s2); border-left: 2px solid var(--paper-3); }
+.dc-map-legend summary .dc-band { width: 18px; height: 18px; font-size: 11px; border-width: 2px; }
+.dc-map-legend[open] summary { transform: translateY(2px); background: var(--grain), var(--paper-2); box-shadow: 0 1px 0 var(--ink); }
+.dc-map-legend-p {
+  position: absolute; right: 0; top: calc(100% + 10px); z-index: 7; width: 304px; padding: var(--s3) var(--s4) var(--s3);
+  background: var(--grain), var(--paper-0); border: var(--bw) solid var(--ink); border-radius: var(--r-md); box-shadow: var(--sh-2);
+  animation: pop-in .3s var(--ease-out) both; transform-origin: top right;
+}
+.dc-map-legend-p h4 { margin: 0 0 6px; font: 400 14px var(--display); }
+.dc-map-legend-p h4 + .cols + h4 { margin-top: var(--s3); padding-top: var(--s2); border-top: 2px dashed var(--paper-3); }
+.dc-map-legend-p .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 6px var(--s2); }
+.dc-map-legend-p .cols div { display: flex; align-items: center; gap: 6px; font-weight: 900; }
+.dc-map-legend-p .sub { margin: var(--s3) 0 0; color: var(--sumi2); font-size: 12px; line-height: 1.4; }
+.dc-map-legend-p .dc-band { width: 18px; height: 18px; font-size: 11px; border-width: 2px; }
 
-/* map surface */
-.dc-map-wrap { position: relative; flex: 1; min-height: 0; border: 1.5px solid var(--sumi); border-radius: 3px 5px 4px 6px / 5px 3px 6px 4px; background: var(--fiber), var(--grain), #f8f1e2; overflow: hidden; }
+/* map surface: washi sheet in a thick ink frame with a thin inner print rule */
+.dc-map-wrap {
+  position: relative; flex: 1; min-height: 0; overflow: hidden;
+  background: var(--fiber), var(--grain), radial-gradient(ellipse at 50% 45%, #faf3e3, #f1e5cb 120%);
+  border: var(--bw) solid var(--ink); border-radius: var(--r-lg); box-shadow: var(--sh-1);
+}
+.dc-map-wrap::after {
+  content: ''; position: absolute; inset: 5px; pointer-events: none;
+  border: 2px solid var(--paper-3); border-radius: calc(var(--r-lg) - 6px); box-shadow: inset 0 0 36px rgba(122, 86, 36, .14);
+}
 .dc-map-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.dc-map-svg text { font-family: var(--body); font-weight: 700; text-anchor: middle; paint-order: stroke; stroke: #f8f1e2; stroke-width: .55px; stroke-linejoin: round; }
-.dc-map-svg .bg .sea { fill: #d5e1e3; }
-.dc-map-svg .bg .river { fill: none; stroke: #c3d6dc; stroke-width: 2.2; stroke-linecap: round; }
-.dc-map-svg .bg .rail { fill: none; stroke: #a9bf8f; stroke-width: .45; stroke-dasharray: 1.4 .9; }
-.dc-map-svg .bg .park { fill: #e1e6cd; }
-.dc-map-svg .bg .land { fill: #ece0c6; stroke: var(--sumi3); stroke-width: .35; }
-.dc-map-svg .bg .geo { font-size: 1.85px; fill: #5f7a84; font-weight: 500; stroke-width: .35px; letter-spacing: .05px; }
-.dc-map-svg .bg .st { stroke: #e3d6bc; stroke-width: 2.4; }
+.dc-map-svg text { font-family: var(--body); font-weight: 700; text-anchor: middle; paint-order: stroke; stroke: #f8f0de; stroke-width: calc(.6px * var(--ls, 1)); stroke-linejoin: round; }
+.dc-map-svg .bg .sea { fill: #d9d1b4; }
+.dc-map-svg .bg .river { fill: none; stroke: #d3c9a8; stroke-width: 2.4; stroke-linecap: round; }
+.dc-map-svg .bg .rail { fill: none; stroke: #9db884; stroke-width: .5; stroke-dasharray: 1.4 .9; }
+.dc-map-svg .bg .park { fill: #dde5c4; }
+.dc-map-svg .bg .land { fill: #ebdcbd; stroke: var(--sumi3); stroke-width: .4; }
+.dc-map-svg .bg .geo { font-size: calc(1.85px * var(--ls, 1)); fill: var(--sumi2); font-weight: 700; stroke-width: calc(.45px * var(--ls, 1)); letter-spacing: .05px; }
+.dc-map-svg .bg .geo .en { font-size: calc(1.85px * var(--ls, 1)); }
+.dc-map-svg .bg .st { stroke: #e2d3b4; stroke-width: 2.6; }
 
-/* area nodes */
+/* area nodes: name + sum labels, an indigo count stamp, the restaurant ring around it */
 .dc-area .hit { fill: transparent; }
-.dc-area .nm { font-size: 2.1px; fill: var(--sumi); }
-.dc-area .nm .jp { font-family: var(--body); font-weight: 700; font-size: 1.9px; fill: var(--sumi2); stroke-width: .3px; }
-.dc-area .sm { font-size: 1.85px; fill: var(--sumi2); font-weight: 700; }
-.dc-area .stamp { cursor: pointer; outline: none; }
-.dc-area .stamp rect { fill: var(--ai); stroke: var(--ai2); stroke-width: .3; transition: transform .15s; transform-box: fill-box; transform-origin: center; }
-.dc-area .stamp .cnt { font: 400 2.3px var(--display); fill: var(--washi); stroke: none; }
-.dc-area.empty .stamp rect { fill: #fbf6ec; stroke: var(--ai); stroke-width: .35; stroke-dasharray: .9 .5; }
-.dc-area.empty .stamp .cnt { fill: var(--ai); }
-.dc-area .stamp:hover rect, .dc-area .stamp.is-hover rect { transform: scale(1.18) rotate(-6deg); }
-.dc-area .stamp:focus-visible rect, .dc-area.locked:focus-visible .lk { stroke: var(--shu); stroke-width: .5; stroke-dasharray: .8 .5; }
-.dc-area .more { font-size: 1.8px; fill: var(--sumi); font-weight: 800; }
-.dc-area .more.has-act { fill: var(--shu); }
+.dc-area .nm { font-size: calc(2.1px * var(--ls, 1)); fill: var(--sumi); font-weight: 800; stroke-width: calc(.7px * var(--ls, 1)); }
+.dc-area .nm .jp { font-family: var(--body); font-weight: 700; font-size: calc(1.9px * var(--ls, 1)); fill: var(--sumi2); }
+.dc-area .sm { font-size: calc(1.85px * var(--ls, 1)); fill: var(--sumi2); font-weight: 700; }
+.dc-map-svg.tight .dc-area .sm { display: none; } /* small pane: names only (sums live in the ledger's city rows) */
+.dc-area .stamp { cursor: pointer; outline: none; transform-box: fill-box; transform-origin: center; transition: transform .18s var(--ease-pop); }
+.dc-area .stamp .face { fill: var(--wood2); stroke: var(--ink); stroke-width: .42; }
+.dc-area .stamp .sh { fill: var(--ink); transform: translateY(.55px); }
+.dc-area .stamp .cnt { font: 400 2.7px var(--display); fill: #fffaf0; stroke: var(--ink); stroke-width: .55px; }
+.dc-area.empty .stamp .face { fill: var(--paper-0); stroke: var(--wood2); stroke-width: .38; stroke-dasharray: .9 .55; }
+.dc-area.empty .stamp .sh { fill: rgba(31, 27, 23, .16); }
+.dc-area.empty .stamp .cnt { fill: var(--wood2); stroke: none; }
+.dc-area .stamp:hover, .dc-area .stamp.is-hover { transform: scale(1.14) rotate(-4deg); }
+.dc-area .stamp:focus-visible .face, .dc-area.locked:focus-visible .lk { stroke: var(--focus); stroke-width: .6; stroke-dasharray: none; }
+.dc-area .more { pointer-events: none; }
+.dc-area .more .mi { transform: scale(var(--ls, 1)); }
+.dc-area .more rect { fill: var(--paper-0); stroke: var(--ink); stroke-width: .32; }
+.dc-area .more .sh { fill: var(--ink); stroke: none; transform: translateY(.4px); }
+.dc-area .more text { font: 900 1.8px var(--body); fill: var(--ink); stroke: none; }
+.dc-area .more.has-act rect:not(.sh) { fill: var(--shu); }
+.dc-area .more.has-act text { fill: #fffaf0; }
 .dc-area.locked { cursor: pointer; outline: none; }
-.dc-area.locked .lk { fill: rgba(251, 246, 236, .7); stroke: var(--sumi2); stroke-width: .3; stroke-dasharray: .8 .55; }
-.dc-area.locked .lkc { font: 400 2px var(--display); fill: var(--sumi3); stroke: none; }
+.dc-area.locked .lk { fill: rgba(252, 247, 236, .85); stroke: var(--sumi2); stroke-width: .35; stroke-dasharray: .8 .55; }
+.dc-area.locked .lk-sh { fill: rgba(31, 27, 23, .14); }
+.dc-area.locked .lkc { font: 400 2.5px var(--display); fill: var(--sumi3); stroke: none; }
 .dc-area.locked .nm { fill: var(--sumi2); }
-.dc-area.locked:hover .lk { stroke: var(--sumi); fill: #fbf6ec; }
+.dc-area.locked:hover .lk { stroke: var(--ink); stroke-dasharray: none; fill: #fffaf0; }
+.dc-area.locked:hover .lkc { fill: var(--sumi); }
 
-/* restaurant pins: shape = concept, fill = overlay band, inner washi mark = band, ring = act-now health */
+/* restaurant pins: shape = concept, fill = overlay band, inner washi mark = band, ring = act-now health.
+   Sticker look: a solid ink copy of the shape (.sh) sits under the body as a hard drop. */
 .dc-pin { cursor: pointer; outline: none; }
-.dc-pin .in { transition: transform .14s cubic-bezier(.2, .8, .2, 1); transform-box: fill-box; transform-origin: center; }
-.dc-pin .body { stroke: var(--sumi); stroke-width: .28; }
-.dc-pin.b-good .body { fill: var(--dc-good); } .dc-pin.b-watch .body { fill: #d1a443; } .dc-pin.b-act .body { fill: var(--dc-act); }
-.dc-pin .mark { fill: none; stroke: #fbf6ec; stroke-width: .32; stroke-linecap: round; stroke-linejoin: round; }
-.dc-pin.b-watch .mark { stroke: var(--sumi); }
+.dc-pin .in { transition: transform .16s var(--ease-pop); transform-box: fill-box; transform-origin: center; }
+.dc-pin .body { stroke: var(--ink); stroke-width: .4; stroke-linejoin: round; }
+.dc-pin .sh { fill: var(--ink); transform: translateY(.42px); }
+.dc-pin.b-good .body { fill: var(--c-upgrade); } .dc-pin.b-watch .body { fill: var(--c-money); } .dc-pin.b-act .body { fill: var(--dc-act); }
+.dc-pin .mark { fill: none; stroke: #fffaf0; stroke-width: .46; stroke-linecap: round; stroke-linejoin: round; }
+.dc-pin.b-watch .mark { stroke: var(--ink); }
 .dc-pin .ring { fill: none; stroke: none; }
-.dc-pin.is-act .ring { stroke: var(--shu); stroke-width: .38; }
-.dc-pin:hover .in, .dc-pin:focus-visible .in, .dc-pin.is-hover .in { transform: translateY(-.5px) scale(1.35); filter: drop-shadow(0 .5px .4px rgba(31, 27, 23, .55)); }
+.dc-pin.is-act .ring { fill: none; stroke: var(--shu); stroke-width: .3; }
+.dc-pin:hover .in, .dc-pin:focus-visible .in, .dc-pin.is-hover .in { transform: translateY(-.5px) scale(1.3); }
+.dc-pin:hover .sh, .dc-pin:focus-visible .sh, .dc-pin.is-hover .sh { transform: translateY(.7px); }
 .dc-pin:hover .body, .dc-pin:focus-visible .body, .dc-pin.is-hover .body { stroke-width: .5; }
-.dc-pin:focus-visible .ring { stroke: var(--sumi); stroke-width: .3; stroke-dasharray: .6 .4; }
-.dc-pin.big .body { stroke-width: .4; } .dc-pin.big .mark { stroke-width: .5; } .dc-pin.big.is-act .ring { stroke-width: .55; }
-.dc-pin.big .in { transform-origin: center; }
-.dc-pin.big:hover .in, .dc-pin.big:focus-visible .in, .dc-pin.big.is-hover .in { transform: translateY(-.6px) scale(1.12); }
-.dc-pin .nm { font-size: 2.1px; fill: var(--sumi); }
-.dc-pin .ol { font-size: 2.1px; font-weight: 800; fill: var(--sumi2); }
+.dc-pin:focus-visible .ring { stroke: var(--focus); stroke-width: .45; stroke-dasharray: none; }
+.dc-pin.big .body { stroke-width: .55; } .dc-pin.big .sh { transform: translateY(.7px); } .dc-pin.big .mark { stroke-width: .6; } .dc-pin.big.is-act .ring { stroke-width: .45; }
+.dc-pin.big:hover .in, .dc-pin.big:focus-visible .in, .dc-pin.big.is-hover .in { transform: translateY(-.6px) scale(1.1); }
+.dc-pin .nm { font-size: calc(2.1px * var(--ls, 1)); fill: var(--sumi); font-weight: 800; stroke-width: calc(.7px * var(--ls, 1)); }
+.dc-pin .ol { font-size: calc(2.1px * var(--ls, 1)); font-weight: 900; fill: var(--sumi2); stroke-width: calc(.7px * var(--ls, 1)); }
 .dc-pin .ol.b-act { fill: var(--shu2); } .dc-pin .ol.b-good { fill: var(--matcha2); } .dc-pin .ol.b-watch { fill: var(--kin2); }
 @media (prefers-reduced-motion: no-preference) {
   .dc-pin.is-act .ring { animation: dc-pulse 1.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
-  @keyframes dc-pulse { 50% { transform: scale(1.3); opacity: .35; } }
+  @keyframes dc-pulse { 50% { transform: scale(1.12); opacity: .5; } }
 }
 
-/* city lot plan */
-.dc-map-svg .blk { fill: rgba(251, 246, 236, .75); stroke: rgba(31, 27, 23, .3); stroke-width: .25; }
+/* city lot plan: paper blocks between streets; open lots are gold "for sale" tags */
+.dc-map-svg .blk { fill: rgba(252, 247, 236, .92); stroke: rgba(31, 27, 23, .55); stroke-width: .35; filter: drop-shadow(0 .5px 0 rgba(31, 27, 23, .22)); }
 .dc-lot { cursor: pointer; outline: none; }
-.dc-lot .lot { fill: transparent; stroke: var(--sumi2); stroke-width: .3; stroke-dasharray: 1 .6; }
-.dc-lot .fs { font-size: 1.9px; fill: var(--sumi2); }
-.dc-lot .pr { font: 400 2.2px var(--display); fill: var(--sumi); }
-.dc-lot .nm { font-size: 1.9px; fill: var(--sumi2); }
-.dc-lot:hover .lot, .dc-lot:focus-visible .lot { stroke: var(--sumi); stroke-width: .45; fill: rgba(201, 154, 60, .12); }
-.dc-lot:focus-visible .lot { stroke: var(--shu); }
-.dc-lot.poor .pr { fill: var(--sumi3); }
+.dc-lot .lot { fill: var(--c-money-soft); stroke: var(--kin2); stroke-width: .4; stroke-dasharray: 1 .6; transition: fill .15s; }
+.dc-lot .fs { font-size: calc(1.9px * var(--ls, 1)); font-weight: 900; fill: var(--kin2); }
+.dc-lot .pr { font: 400 calc(2.5px * var(--ls, 1)) var(--display); fill: var(--sumi); }
+.dc-lot .nm { font-size: calc(1.9px * var(--ls, 1)); fill: var(--sumi2); }
+.dc-lot:hover .lot, .dc-lot:focus-visible .lot { stroke: var(--ink); stroke-width: .45; stroke-dasharray: none; fill: #f4dc9c; }
+.dc-lot:focus-visible .lot { stroke: var(--focus); stroke-width: .6; }
+.dc-lot.poor .lot { fill: var(--paper-2); stroke: var(--sumi3); }
+.dc-lot.poor .fs, .dc-lot.poor .pr { fill: var(--sumi3); }
 
-/* locked-area popover */
-.dc-map-pop { position: absolute; z-index: 6; width: 230px; padding: 10px 12px 11px; font-size: 12.5px; background: var(--grain), #fbf6ec; border: 1.5px solid var(--sumi); border-radius: var(--edge); box-shadow: var(--lift); }
-.dc-map-pop b { font: 400 14px var(--display); display: block; padding-right: 16px; }
-.dc-map-pop p { margin: 4px 0 6px; color: var(--sumi2); line-height: 1.35; }
-.dc-map-pop ul { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 3px; }
-.dc-map-pop li { display: flex; align-items: center; gap: 6px; font-weight: 700; }
-.dc-map-pop .dc-band { width: 16px; height: 16px; font-size: 10px; }
-.dc-map-pop .x { position: absolute; top: 4px; right: 6px; border: 0; background: none; font: 700 17px var(--body); color: var(--sumi2); cursor: pointer; line-height: 1; }
+/* locked-area popover: a chunky card with a lock seal and one primary Unlock key */
+.dc-map-pop {
+  position: absolute; z-index: 6; width: 264px; padding: var(--s3) var(--s4) var(--s4); font-size: 13.5px; color: var(--ink);
+  background: var(--grain), var(--paper-0); border: var(--bw) solid var(--ink); border-radius: var(--r-lg); box-shadow: var(--sh-2);
+  transform-origin: top center;
+}
+.dc-map-pop .hd { display: flex; align-items: center; gap: var(--s2); }
+.dc-map-pop .hd > .ico-seal { flex: none; transform: rotate(-5deg); filter: drop-shadow(0 2px 0 rgba(31, 27, 23, .35)); }
+.dc-map-pop b { flex: 1; min-width: 0; font: 400 17px/1.15 var(--display); }
+.dc-map-pop b .jp { color: var(--sumi2); }
+.dc-map-pop p { margin: var(--s2) 0 var(--s3); color: var(--sumi2); line-height: 1.45; font-size: 13px; }
+.dc-map-pop ul { list-style: none; margin: 0 0 var(--s4); padding: var(--s2) var(--s3); display: grid; gap: 6px; background: var(--paper-2); border-radius: var(--r-md); box-shadow: inset 0 2px 0 rgba(31, 27, 23, .1); }
+.dc-map-pop li { display: flex; align-items: center; gap: var(--s2); font-weight: 900; }
+.dc-map-pop li:not(.met) { color: var(--shu2); }
+.dc-map-pop .dc-band { width: 18px; height: 18px; font-size: 11px; border-width: 2px; }
+.dc-map-pop .btn { width: 100%; }
+.dc-map-pop .btn.done { pointer-events: none; }
+.dc-map-pop .x {
+  flex: none; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; color: var(--ink); cursor: pointer;
+  background: var(--grain), var(--paper-0); border: 2px solid var(--ink); border-radius: 50%;
+  box-shadow: inset 0 -2px 0 var(--paper-3), 0 2px 0 var(--ink); transition: transform .1s var(--ease-out);
+}
+.dc-map-pop .x:hover { transform: translateY(-1px) rotate(-8deg); }
+.dc-map-pop .x:active { transform: translateY(2px); box-shadow: inset 0 -1px 0 var(--paper-3), 0 0 0 var(--ink); }
+.dc-map-pop .x:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }

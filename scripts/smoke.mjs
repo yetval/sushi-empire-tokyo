@@ -15,6 +15,8 @@ const browser = await chromium.launch({
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 760 } });
   page.setDefaultTimeout(15_000);
+  // block Vite's HMR socket: concurrent source edits must not reload the page mid-test
+  await page.addInitScript(() => { window.WebSocket = class { addEventListener() {} removeEventListener() {} send() {} close() {} }; });
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => {
@@ -34,34 +36,45 @@ try {
   const saveKey = 'sushi-empire-tokyo-save';
   const prompt = page.locator('#h-prompt.show');
   const waitForPrompt = (text, timeout = 15_000) => prompt.filter({ hasText: text }).waitFor({ state: 'visible', timeout });
-  // Jump between stations so the same scenario runs against different district layouts.
-  // Movement is verified separately with the real keyboard input.
+  // Jump to a spot so the scenario doesn't depend on walking routes. Movement is verified separately with real keys.
   const visit = (station) => page.evaluate(({ standId, station }) => {
     const { player, district } = window.game;
-    const spot = station === 'supplier' ? district.supplier : district.sites.find((site) => site.id === standId)[station];
+    const spot = district.sites.find((site) => site.id === standId)[station];
     player.teleport(spot.x, spot.z, spot.yaw);
   }, { standId, station });
+  const sheet = page.locator('.open > .sheet, .sheet.open, .open .sheet').first(); // a closing sheet lingers ~200 ms
+  /** Press E at the stand: the restaurant sheet opens on the tab the tutorial asks for. */
+  const openStand = async (tab) => {
+    await visit('counter');
+    await waitForPrompt(/manage/i);
+    await page.keyboard.press('e');
+    await sheet.waitFor();
+    if (tab) await sheet.locator(`.stab.on[data-tab="${tab}"]`).waitFor();
+  };
+  const closeSheet = async () => {
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => window.game.input.enabled);
+  };
 
-  await check('keyboard title navigation, character creation, and tutorial dialogue', async () => {
+  await check('keyboard title navigation, company name, and tutorial dialogue', async () => {
     await page.goto(url);
     await page.waitForFunction(() => !!window.game);
     await page.keyboard.press('Tab');
     assert.equal(await page.evaluate(() => document.activeElement?.dataset.act), 'new');
     await page.keyboard.press('Space');
-    await page.locator('#cr-name').waitFor();
+    await page.locator('#nc-co').waitFor();
     await page.getByRole('button', { name: /settings/i }).click();
     await page.getByRole('checkbox', { name: /invert camera/i }).check();
     await page.getByRole('button', { name: /new game/i }).click();
-    await page.locator('#cr-name').fill('Smoke Chef');
+    await page.locator('#nc-co').fill('Smoke Sushi Co');
+    await page.locator('#nc-name').fill('Smoke Owner');
     await page.getByRole('button', { name: /open the stand/i }).click();
     const dialogue = page.locator('.dialog.open');
     await dialogue.getByText('Grandpa Kenji', { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => !!document.activeElement?.closest('.title')), false);
-    const finalPrompt = dialogue.locator('.more').filter({ hasText: 'click / E ✓' });
-    for (let i = 0; i < 6 && !(await finalPrompt.isVisible()); i++) {
-      await page.keyboard.press('e');
-    }
-    await dialogue.locator('.txt').getByText(/follow the yellow arrow.+back of the counter\.$/i).waitFor();
+    const lastLine = dialogue.locator('.txt').getByText(/follow the yellow arrow.+press e there to run it\.$/i);
+    for (let i = 0; i < 8 && !(await lastLine.isVisible()); i++) await page.keyboard.press('e');
+    await lastLine.waitFor();
     await page.keyboard.down('e');
     try {
       await dialogue.waitFor({ state: 'hidden' });
@@ -70,12 +83,13 @@ try {
       await page.keyboard.up('e');
     }
     await page.waitForFunction(() => window.game.input.enabled);
-    assert.equal(await page.evaluate(() => window.game.s.player.name), 'Smoke Chef');
+    assert.equal(await page.evaluate(() => window.game.s.player.company), 'Smoke Sushi Co');
+    assert.equal(await page.evaluate(() => window.game.s.player.name), 'Smoke Owner');
     assert.equal(await page.evaluate(() => window.game.cam.invertY), true);
     assert.equal(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).settings.invertY, saveKey), true);
   });
 
-  await check('WASD moves the chef', async () => {
+  await check('WASD moves the owner', async () => {
     const start = await page.evaluate(() => ({ x: window.game.player.pos.x, z: window.game.player.pos.z }));
     await page.keyboard.down('w');
     try {
@@ -89,79 +103,43 @@ try {
     }
   });
 
-  await check('first customer order reaches the prep station', async () => {
-    await visit('counter');
-    await waitForPrompt(/take order/i, 90_000);
-    await page.keyboard.press('e');
-    await page.waitForFunction((id) => window.game.s.restaurants[id].orders.length > 0, standId);
-    await visit('prep');
-    await waitForPrompt(/make \d/i);
-    await page.keyboard.press('e');
-    await page.locator('.cook.open').waitFor();
+  await check('E at the stand opens Staff; hiring a chef starts sales on its own', async () => {
+    await openStand('staff');
+    await page.waitForFunction(() => window.game.s.tutorial === 1);
+    assert.equal(await page.evaluate(() => window.game.s.lifetime.customers), 0, 'No chef, no sales');
+    await sheet.locator('[data-act="hirebest"][data-arg="chef"]').first().click();
+    await page.waitForFunction((id) => window.game.s.staff.some((e) => e.role === 'chef' && e.restaurant === id), standId);
+    await closeSheet();
+    await page.waitForFunction(() => window.game.s.lifetime.customers > 0, null, { timeout: 90_000 });
+    await page.waitForFunction(() => window.game.s.tutorial === 3);
   });
 
-  await check('manual cooking and serving settle the order', async () => {
-    const cook = page.locator('.cook.open');
-    const ticket = await page.evaluate((id) => window.game.s.restaurants[id].orders[0], standId);
-    const cash = await page.evaluate(() => window.game.s.cash);
-    assert.equal(ticket.recipe, 'salmon_nigiri', 'The fresh-save tutorial orders salmon nigiri');
-    const instruction = (text) => cook.locator('.cook-instr').filter({ hasText: text }).waitFor();
-    await instruction(/shape the rice/i);
-    for (const key of ['w', 'd', 's', 'a', 'w', 'd', 's', 'a', 'w']) await page.keyboard.press(key);
-    await instruction(/slice the fish/i);
-    await page.keyboard.press('Space');
-    await cook.locator('.ck-chips .next').filter({ hasText: /cut 2/i }).waitFor();
-    // The knife is still animating the first cut when the second marker appears.
-    await page.waitForTimeout(450);
-    await page.keyboard.press('Space');
-    await instruction(/place the topping/i);
-    await page.keyboard.press('Space');
-    await instruction(/order ready/i);
-    await cook.waitFor({ state: 'hidden' });
-    await visit('counter');
-    await waitForPrompt(/serve 1 order/i);
-    await page.keyboard.press('e');
-    await page.waitForFunction(() => window.game.s.lifetime.customers === 1);
-    const result = await page.evaluate(() => ({ cash: window.game.s.cash, ...window.game.s.lifetime }));
-    assert.equal(result.pieces, ticket.pieces);
-    assert.equal(result.manualOrders, 1);
-    assert.ok(result.cash > cash, 'Serving should increase cash');
-  });
-
-  await check('supplier purchases and restaurant upgrades advance the tutorial', async () => {
-    await visit('supplier');
-    await waitForPrompt(/buy ingredients/i);
-    await page.keyboard.press('e');
-    const shop = page.locator('.shop.open');
-    const before = await page.evaluate(() => ({ cash: window.game.s.cash, spent: window.game.s.lifetime.expenses, rice: window.game.s.inventory.rice }));
-    await shop.locator('[data-arg="rice:10"]').click();
-    const after = await page.evaluate(() => ({ cash: window.game.s.cash, spent: window.game.s.lifetime.expenses, rice: window.game.s.inventory.rice }));
-    assert.equal(after.rice, before.rice + 10);
-    assert.ok(after.spent > before.spent, 'Restocking should charge cash'); // cash can rise mid-test from an award
-    await page.waitForFunction(() => window.game.s.tutorial === 5);
-    await shop.getByRole('button', { name: 'Close' }).click();
-    await page.waitForFunction(() => window.game.input.enabled);
-    await page.keyboard.press('Tab');
-    const management = page.locator('.manage.open');
-    await management.locator('[data-act="upg"][data-arg="station"]').click();
-    await page.waitForFunction((id) => window.game.s.tutorial >= 6 && window.game.s.restaurants[id].upgrades.station === 1, standId);
-    await management.getByRole('button', { name: 'Close' }).click();
+  await check('hiring a server and buying an upgrade advance the tutorial', async () => {
+    await page.evaluate(() => { window.game.s.cash += 20_000; }); // skip a few minutes of earning
+    await openStand('staff');
+    await sheet.locator('[data-act="hirebest"][data-arg="server"]').first().click();
+    await page.waitForFunction(() => window.game.s.tutorial === 4);
+    await closeSheet();
+    await openStand('look');
+    await sheet.locator('[data-act="upg"][data-arg="station"]').click();
+    await page.waitForFunction((id) => window.game.s.tutorial === 5 && window.game.s.restaurants[id].upgrades.station === 1, standId);
+    await closeSheet();
   });
 
   await check('continue preserves progress and applies title screen settings', async () => {
-    const progress = () => page.evaluate((id) => {
-      const { lifetime, inventory, cash, restaurants } = window.game.s;
-      return { lifetime, inventory, cash, upgrades: restaurants[id].upgrades };
-    }, standId);
-    const before = await progress();
+    // the staffed stand keeps selling while the game runs, so compare against the snapshot written at "save & main menu"
     await page.keyboard.press('Escape');
     await page.getByRole('button', { name: /save & main menu/i }).click();
+    const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), saveKey);
     await page.getByRole('button', { name: /settings/i }).click();
     await page.getByRole('checkbox', { name: /mute all/i }).check();
     await page.getByRole('button', { name: /continue/i }).click();
     await page.waitForFunction(() => window.game.started);
-    assert.deepEqual(await progress(), before);
-    assert.equal(await page.evaluate(() => window.game.s.player.name), 'Smoke Chef');
+    const now = await page.evaluate((id) => ({ s: window.game.s, upgrades: window.game.s.restaurants[id].upgrades }), standId);
+    assert.deepEqual(now.upgrades, saved.restaurants[standId].upgrades);
+    assert.deepEqual(now.s.staff.map((e) => e.id), saved.staff.map((e) => e.id));
+    assert.ok(now.s.lifetime.pieces >= saved.lifetime.pieces && now.s.lifetime.pieces > 0);
+    assert.equal(await page.evaluate(() => window.game.s.player.company), 'Smoke Sushi Co');
     assert.equal(await page.evaluate(() => window.game.s.settings.muted), true);
     assert.equal(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).settings.muted, saveKey), true);
   });
@@ -205,7 +183,7 @@ try {
     await continueButton.click();
     await page.waitForFunction(() => window.game.started);
     const restored = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), saveKey);
-    assert.equal(restored.player.name, 'Smoke Chef');
+    assert.equal(restored.player.company, 'Smoke Sushi Co');
     assert.equal(restored.restaurants[standId].upgrades.station, 1);
     assert.ok(restored.lastSaved > original.lastSaved, 'Continuing an away save should checkpoint it immediately');
     assert.ok(restored.lifetime.pieces > original.pieces, 'The checkpoint should include offline franchise sales');

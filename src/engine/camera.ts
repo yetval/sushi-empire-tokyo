@@ -10,7 +10,7 @@ export class ThirdPersonCamera {
   private target = new THREE.Vector3();
   sensitivity = 1;
   invertY = false;
-  /** Optional override (e.g. cooking close-up). Set to null to return to follow mode. */
+  /** Optional override (e.g. scripted screenshots). Set to null to return to follow mode. */
   focus: { pos: THREE.Vector3; look: THREE.Vector3 } | null = null;
 
   private trauma = 0; private dip = 0; private dipV = 0; private fovKick = 0; private baseFov: number;
@@ -41,19 +41,9 @@ export class ThirdPersonCamera {
     this.pitch += dy * 0.004 * this.sensitivity * (this.invertY ? -1 : 1);
     this.pitch = THREE.MathUtils.clamp(this.pitch, -0.15, 1.25);
     this.dist = THREE.MathUtils.clamp(this.dist + wheel * 0.8, 2.5, 16);
-    if (dx || dy) this.lastDrag = performance.now();
   }
-  private lastDrag = -1e9;
 
   snap(p: THREE.Vector3): void { this.target.copy(p).add(new THREE.Vector3(0, 1.5, 0)); this.curDist = this.dist; this.update(1, p, true); }
-
-  /** Gently rotate the camera toward a yaw (used near counters for comfortable framing). */
-  nudgeYaw(yaw: number, dt: number, strength = 1.5): void {
-    if (performance.now() - this.lastDrag < 2500) return; // never fight the player's own camera drag
-    let d = yaw - this.yaw;
-    d = Math.atan2(Math.sin(d), Math.cos(d));
-    this.yaw += d * Math.min(1, dt * strength);
-  }
 
   update(dt: number, player: THREE.Vector3, instant = false): void {
     if (this.focus) {

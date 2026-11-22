@@ -1,35 +1,35 @@
 // Daichō 台帳 — alert rail: the inbox of paper slips at the bottom of the dashboard.
-// Slips are keyed by alert.id, built once and patched per snapshot. Acting on a slip stamps it 済 (fix) or 掟 (rule)
+// Slips are keyed by alert.id, built once and patched per snapshot. Acting on a slip stamps it 済
 // when the alert disappears from the next snapshot. Snooze lives in this part's memory only.
+import { audio } from '../../audio/audio';
 import { unlockDistrict } from '../../core/actions';
-import { AREAS, INGREDIENTS, IngredientId, PROPERTIES } from '../../core/data';
-import { Alert, Severity, applyFix, applyRule } from '../../core/empire';
+import { AREAS, PROPERTIES } from '../../core/data';
+import { Alert, Severity, applyFix } from '../../core/empire';
 import { yen } from '../../core/format';
-import { esc, ingIcon, run } from '../dom';
+import { run } from '../dom';
+import { coinBurst, punch } from '../fx';
+import { icon } from '../icons';
 import './alerts.css';
 import { Ctx, Part, Snap } from './shared';
 
+// glyph is markup (innerHTML)
 const SEV: Record<Severity, { glyph: string; word: string }> = {
-  critical: { glyph: '✕', word: 'Act now' }, warning: { glyph: '△', word: 'Soon' }, opportunity: { glyph: '★', word: 'Chance' },
+  critical: { glyph: icon('close', 12), word: 'Act now' }, warning: { glyph: '△', word: 'Soon' }, opportunity: { glyph: icon('sparkle', 13), word: 'Chance' },
 };
 const ROW = 3; // collapsed rail = one row of 3 slips (+ a compact "+N" tile)
 const SNOOZE_MS = 120_000;
 const STAMP_MS = 1500;
-const ACTED_MS = 20_000; // a rule resolves on the next in-game hour, so keep "we acted" around a little while
-const RESTOCK_NOTE = 'Restocking runs itself once you research Scheduled Deliveries (Research) or hire a manager.';
+const ACTED_MS = 20_000; // keep "we acted" around a little while, in case the alert clears a tick later
 
 interface Slip {
   a: Alert; el: HTMLElement; sevGlyph: HTMLElement; sevWord: HTMLElement;
-  txt: HTMLElement; ings: HTMLElement; pre: HTMLElement; who: HTMLButtonElement; post: HTMLElement;
-  fix: HTMLButtonElement; alt: HTMLButtonElement; rule: HTMLButtonElement; note: HTMLElement;
+  txt: HTMLElement; pre: HTMLElement; who: HTMLButtonElement; post: HTMLElement;
+  fix: HTMLButtonElement; alt: HTMLButtonElement;
   stamping: boolean;
 }
 
-/** "rice, nori and cucumber" */
-const listOf = (ids: IngredientId[]) => {
-  const n = ids.map((i) => INGREDIENTS[i].name.toLowerCase());
-  return n.length > 1 ? `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}` : n[0] ?? '';
-};
+/** "A, B and C" */
+const listOf = (n: string[]) => n.length > 1 ? `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}` : n[0] ?? '';
 const set = (e: HTMLElement, text: string) => { if (e.textContent !== text) e.textContent = text; };
 const btn = (cls: string, text: string) => {
   const b = document.createElement('button');
@@ -40,13 +40,13 @@ const btn = (cls: string, text: string) => {
 export class AlertRail implements Part {
   readonly el = document.createElement('section');
   private readonly grid = document.createElement('div');
-  private readonly more = btn('dc-al-more', '');
+  private readonly more = btn('btn dc-al-more', '');
   private readonly empty = document.createElement('div');
   private readonly live = document.createElement('div');
   private readonly slips = new Map<string, Slip>();
   private order: string[] = [];
   private readonly snoozed = new Map<string, number>(); // id → until (performance.now)
-  private readonly acted = new Map<string, { mark: '済' | '掟'; t: number }>();
+  private readonly acted = new Map<string, number>(); // id → when we acted (performance.now)
   private seenCritical: Set<string> | null = null; // null until the first render (don't announce what was already there)
   private expanded = false;
   private readonly timers = new Set<number>();
@@ -69,7 +69,7 @@ export class AlertRail implements Part {
   render(snap: Snap): void {
     const now = performance.now();
     for (const [id, until] of this.snoozed) if (until <= now) this.snoozed.delete(id);
-    for (const [id, a] of this.acted) if (now - a.t > ACTED_MS) this.acted.delete(id);
+    for (const [id, t] of this.acted) if (now - t > ACTED_MS) this.acted.delete(id);
     const list = snap.alerts.filter((a) => !this.snoozed.has(a.id));
     const ids = new Set(list.map((a) => a.id));
 
@@ -77,15 +77,14 @@ export class AlertRail implements Part {
     const crit = new Set(list.filter((a) => a.severity === 'critical').map((a) => a.id));
     if (this.seenCritical) {
       const fresh = list.filter((a) => crit.has(a.id) && !this.seenCritical!.has(a.id));
-      if (fresh.length) this.live.textContent = fresh.map((a) => `Act now: ${a.text}`).join(' ');
+      if (fresh.length) { this.live.textContent = fresh.map((a) => `Act now: ${a.text}`).join(' '); audio.sfx('alert'); }
     }
     this.seenCritical = crit;
 
     // gone: stamp if we acted on it, otherwise drop
     for (const [id, slip] of this.slips) {
       if (ids.has(id) || slip.stamping) continue;
-      const acted = this.acted.get(id);
-      if (acted && !this.snoozed.has(id)) this.stamp(slip, acted.mark);
+      if (this.acted.has(id) && !this.snoozed.has(id)) this.stamp(slip);
       else this.drop(id);
     }
 
@@ -122,56 +121,42 @@ export class AlertRail implements Part {
 
   private make(a: Alert): Slip {
     const el = document.createElement('article');
-    el.className = 'dc-al-slip';
+    el.className = 'dc-al-slip pop-in';
+    el.addEventListener('animationend', () => el.classList.remove('pop-in'), { once: true });
     const tab = document.createElement('span'); tab.className = 'dc-al-tab'; tab.setAttribute('aria-hidden', 'true');
     const body = document.createElement('div'); body.className = 'dc-al-body';
-    // head line: severity word · fix · rule · snooze; then the cause, clamped to 2 lines (full text in title + aria-label)
+    // head line: severity word · fix · snooze; then the cause, clamped to 2 lines (full text in title + aria-label)
     const head = document.createElement('div'); head.className = 'dc-al-head';
     const sevWord = document.createElement('b'); sevWord.className = 'dc-al-word';
     const fix = btn('btn small dc-al-fix', '');
-    const rule = btn('btn small ghost dc-al-rule', '掟 Rule');
-    rule.setAttribute('aria-label', 'Make it a rule'); rule.title = 'Make it a house rule (掟) so this never comes back';
-    const snooze = btn('dc-al-snooze', 'zZ');
+    const snooze = btn('btn small ghost dc-al-snooze', 'zZ');
     snooze.setAttribute('aria-label', 'Snooze for 2 minutes'); snooze.title = 'Snooze — hide for 2 minutes';
-    const alt = btn('btn small ghost dc-al-alt', ''); // secondary: unlock the area right here
-    head.append(sevWord, fix, alt, rule, snooze);
+    const alt = btn('btn small primary dc-al-alt', ''); // unlock the area right here (a spend = primary)
+    head.append(sevWord, fix, alt, snooze);
     const p = document.createElement('p'); p.className = 'dc-al-txt';
     const pre = document.createElement('span'), post = document.createElement('span');
     const who = btn('dc-al-who', '');
-    const ings = document.createElement('span'); ings.className = 'dc-al-ings';
-    p.append(ings, pre, who, post);
-    const note = document.createElement('p'); note.className = 'dc-al-note'; note.hidden = true; note.textContent = RESTOCK_NOTE;
-    note.setAttribute('role', 'note');
-    body.append(head, p, note);
+    p.append(pre, who, post);
+    body.append(head, p);
     el.append(tab, body);
-    const slip: Slip = { a, el, sevGlyph: tab, sevWord, txt: p, ings, pre, who, post, fix, alt, rule, note, stamping: false };
+    const slip: Slip = { a, el, sevGlyph: tab, sevWord, txt: p, pre, who, post, fix, alt, stamping: false };
 
     const { store } = this.ctx;
     const hoverOn = () => { if (slip.a.restIds.length === 1) store.set({ hover: slip.a.restIds[0] }); };
     const hoverOff = () => { if (slip.a.restIds.length === 1 && store.st.hover === slip.a.restIds[0]) store.set({ hover: null }); };
     who.addEventListener('mouseenter', hoverOn); who.addEventListener('focus', hoverOn);
     who.addEventListener('mouseleave', hoverOff); who.addEventListener('blur', hoverOff);
-    who.addEventListener('click', () => {
-      const ids = slip.a.restIds;
-      if (ids.length === 1) this.ctx.opts.openRestaurant(ids[0]);
-      else { store.st.selected = new Set(ids); store.touchSelected(); }
-    });
+    who.addEventListener('click', () => { if (slip.a.restIds.length === 1) this.ctx.opts.openRestaurant(slip.a.restIds[0]); });
     fix.addEventListener('click', () => {
       const a = slip.a;
-      if (a.fix) { if (run(fix, applyFix(this.ctx.host.s, a))) this.act(a.id, '済'); }
-      else if (a.propId) this.ctx.opts.buyLot(a.propId); // opens the concept picker; no stamp (the buy may be cancelled)
+      if (a.fix) {
+        if (run(fix, applyFix(this.ctx.host.s, a), a.fix.cost > 0 ? 'purchase' : 'coin')) { punch(fix); if (a.fix.cost > 0) coinBurst(fix, 12); this.act(a.id); }
+      } else if (a.propId) { punch(fix); this.ctx.opts.buyLot(a.propId); } // opens the concept picker; no stamp (the buy may be cancelled)
       else if (a.areaId) store.set({ area: a.areaId }); // map switches region + zooms itself
     });
     alt.addEventListener('click', () => {
       const id = slip.a.areaId;
-      if (id && run(alt, unlockDistrict(this.ctx.host.s, id), 'success')) this.act(slip.a.id, '済');
-    });
-    rule.addEventListener('click', () => {
-      const r = slip.a.rule;
-      if (r === 'autoRestock') { // global: no per-restaurant rule to flip — show the guidance popover
-        note.hidden = !note.hidden; rule.setAttribute('aria-expanded', String(!note.hidden)); return;
-      }
-      if (r && run(rule, applyRule(this.ctx.host.s, r, slip.a.restIds), 'success')) this.act(slip.a.id, '掟');
+      if (id && run(alt, unlockDistrict(this.ctx.host.s, id), 'purchase')) { punch(alt); coinBurst(alt, 12); this.act(slip.a.id); }
     });
     snooze.addEventListener('click', () => {
       this.snoozed.set(slip.a.id, performance.now() + SNOOZE_MS);
@@ -187,37 +172,26 @@ export class AlertRail implements Part {
   }
 
   private patch(slip: Slip, a: Alert): void {
-    const prevRule = slip.a.rule;
     slip.a = a;
     const sev = SEV[a.severity];
-    if (slip.el.dataset.sev !== a.severity) slip.el.dataset.sev = a.severity;
-    set(slip.sevGlyph, sev.glyph);
+    if (slip.el.dataset.sev !== a.severity) { slip.el.dataset.sev = a.severity; slip.sevGlyph.innerHTML = sev.glyph; }
     set(slip.sevWord, sev.word);
-    // stock: "Low on 🍚 Rice · Nori +k" from a.ingredients (what the restock fix buys); the core text's list is cut at 3 + "…"
-    const ingIds = a.ingredients ?? [];
-    const k = ingIds.join(',');
-    if (slip.ings.dataset.k !== k) {
-      slip.ings.dataset.k = k;
-      slip.ings.innerHTML = ingIds.length ? 'Low on ' + ingIds.slice(0, 3).map((i) => `<span class="dc-al-ing"><span aria-hidden="true">${ingIcon(i)}</span> ${esc(INGREDIENTS[i].name)}</span>`).join(' · ')
-        + (ingIds.length > 3 ? ` <span class="dc-al-ingk">+${ingIds.length - 3}</span>` : '') : '';
-    }
-    const colon = a.text.indexOf(': ');
-    const rest = ingIds.length && colon >= 0 ? a.text.slice(colon) : a.text; // the text after the icon list
-    const full = ingIds.length ? `Low on ${listOf(ingIds)}${rest}` : a.text;
+    // several restaurants: name them in the tooltip / label (the text itself only says "N restaurants")
+    const s = this.ctx.host.s;
+    const n = a.restIds.length;
+    const full = n > 1 ? `${a.text} (${listOf(a.restIds.map((id) => s.restaurants[id]?.name ?? id))})` : a.text;
     const label = `${sev.word}: ${full}`;
     if (slip.el.getAttribute('aria-label') !== label) slip.el.setAttribute('aria-label', label);
     if (slip.txt.title !== full) slip.txt.title = full;
 
-    // restaurant(s): the text starts with the name / "N restaurants" — make that prefix the button
-    const s = this.ctx.host.s;
-    const n = a.restIds.length;
-    const whoText = n === 1 ? (s.restaurants[a.restIds[0]]?.name ?? '') : n > 1 ? `${n} restaurants` : '';
+    // one restaurant: the text starts with its name, make that prefix a button that opens it
+    const whoText = n === 1 ? (s.restaurants[a.restIds[0]]?.name ?? '') : '';
     slip.who.hidden = !whoText;
     set(slip.who, whoText);
-    const aria = n === 1 ? `Open ${whoText}` : `Select these ${n} restaurants in the ledger`;
+    const aria = `Open ${whoText}`;
     if (whoText && slip.who.getAttribute('aria-label') !== aria) slip.who.setAttribute('aria-label', aria);
-    if (whoText && rest.startsWith(whoText)) { set(slip.pre, ''); set(slip.post, rest.slice(whoText.length)); }
-    else { set(slip.pre, whoText ? `${rest} ` : rest); set(slip.post, ''); }
+    if (whoText && a.text.startsWith(whoText)) { set(slip.pre, ''); set(slip.post, a.text.slice(whoText.length)); }
+    else { set(slip.pre, whoText ? `${a.text} ` : a.text); set(slip.post, ''); }
 
     // primary: the alert's fix, else buy the lot, else show the new area on the map
     const lot = a.propId ? PROPERTIES[a.propId] : undefined, area = a.areaId ? AREAS[a.areaId] : undefined;
@@ -225,11 +199,12 @@ export class AlertRail implements Part {
       : lot ? `Pick a concept · ${lot.name}` : area ? 'Show on map' : '';
     slip.fix.hidden = !fixText;
     set(slip.fix, fixText);
-    const fixLong = a.fix?.id === 'restock' && ingIds.length ? `Restock ${listOf(ingIds)} for 1 day, ${yen(a.fix.cost)}` : fixText;
-    if (slip.fix.title !== fixLong) slip.fix.title = fixLong; // may ellipsize in a narrow slip
-    if (slip.fix.getAttribute('aria-label') !== fixLong) slip.fix.setAttribute('aria-label', fixLong);
+    if (slip.fix.title !== fixText) slip.fix.title = fixText; // may ellipsize in a narrow slip
     slip.fix.classList.toggle('poor', s.cash < (a.fix?.cost ?? lot?.price ?? 0));
-    slip.fix.classList.toggle('gold', !a.fix && !!fixText); // growth actions in kin, not shu
+    // colour = what the press does: act / spend (primary green), navigate (brand vermilion). Gold = rewards only.
+    const nav = !a.fix && !lot && !!area;
+    slip.fix.classList.toggle('primary', !nav);
+    slip.fix.classList.toggle('brand', nav);
     slip.alt.hidden = !area;
     if (area) {
       const altText = `Unlock · ${yen(area.unlock.cost)}`;
@@ -237,22 +212,19 @@ export class AlertRail implements Part {
       const altAria = `Unlock ${area.name} for ${yen(area.unlock.cost)}`;
       if (slip.alt.getAttribute('aria-label') !== altAria) slip.alt.setAttribute('aria-label', altAria);
     }
-    slip.rule.hidden = !a.rule;
-    if (a.rule !== prevRule) { slip.note.hidden = true; slip.rule.removeAttribute('aria-expanded'); }
   }
 
-  private act(id: string, mark: '済' | '掟'): void {
-    this.acted.set(id, { mark, t: performance.now() });
+  private act(id: string): void {
+    this.acted.set(id, performance.now());
     this.ctx.refresh();
   }
 
-  private stamp(slip: Slip, mark: '済' | '掟'): void {
+  private stamp(slip: Slip): void {
     slip.stamping = true;
     if (slip.el.contains(document.activeElement)) this.el.focus();
     slip.el.inert = true;
-    slip.el.dataset.stamp = mark;
     slip.el.classList.add('done');
-    slip.el.setAttribute('aria-label', `${mark === '掟' ? 'Handled by a house rule' : 'Resolved'}: ${slip.a.text}`);
+    slip.el.setAttribute('aria-label', `Resolved: ${slip.a.text}`);
     this.acted.delete(slip.a.id);
     const t = window.setTimeout(() => {
       this.timers.delete(t);

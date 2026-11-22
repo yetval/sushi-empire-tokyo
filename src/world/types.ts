@@ -8,6 +8,15 @@ import { Collider } from '../engine/collision';
 
 export interface Spot { x: number; z: number; yaw: number }
 export interface Rect { minX: number; maxX: number; minZ: number; maxZ: number }
+export interface DiningPlace {
+  approach: THREE.Vector3;
+  plate: THREE.Vector3;
+}
+export interface StreetStop {
+  kind: 'photo' | 'phone' | 'bench' | 'vending' | 'browse';
+  spot: Spot;
+  approach: Spot;
+}
 
 export interface RestaurantSite {
   id: string; // property id (PROPERTIES key)
@@ -16,6 +25,7 @@ export interface RestaurantSite {
   prep: Spot; // where the PLAYER stands to cook (prep station)
   queue: Spot[]; // customer queue in front of counter, index 0 = front (facing counter)
   seats: Spot[]; // ALL seat spots for the max seat level; the NPC system only uses the first activeSeats
+  dining: DiningPlace[]; // matched to seats, with the route around the furniture and world-space plate position
   chefs: Spot[]; // chef work spots (length >= property chefSlots + 4)
   servers: Spot[]; // server idle spots (length >= serverSlots)
   cleaner: Spot; manager: Spot;
@@ -30,12 +40,14 @@ export interface DistrictScene {
   id: DistrictId;
   group: THREE.Group; // add to scene
   colliders: Collider[]; // static colliders (walls, buildings, counters, props)
+  traffic: import('./traffic').Traffic; // cars + signal phases (audio crossing chirps read it)
   spawn: Spot; // player arrival point (near metro)
   metro: Spot; // metro entrance: interact → travel map
   supplier: Spot | null; // supplier shop counter: interact → buy ingredients
   hq: Spot | null; // headquarters entrance (Shinjuku); visible building grows with state.hq
   sites: RestaurantSite[]; // every property in this district (owned or for sale)
   walkPaths: THREE.Vector3[][]; // closed loops along sidewalks for pedestrians (y=0)
+  streetStops: StreetStop[];
   edges: Spot[]; // off-screen-ish points where NPCs appear/disappear
   storyNpcs: StoryNpc[];
   /** Per-frame animation of local scenery. night: 0 day .. 1 full night. */

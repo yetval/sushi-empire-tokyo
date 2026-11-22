@@ -1,0 +1,169 @@
+/* Progress surfaces inside the Manage window: Research, Awards, Finances, Statistics, Quests.
+   Loads after manage.css + screens.css, so these rules override the older .node/.ms/.ach/.receipt/.ledger styling. */
+
+/* ---------------------------------------------------------------- shared page head */
+.pg-head { display: flex; align-items: center; gap: var(--s3); min-height: 48px; margin: 0 0 var(--s3); padding-bottom: var(--s3); border-bottom: var(--bw) solid var(--ink); }
+.pg-head > .ico-seal { transform: rotate(-5deg); filter: drop-shadow(0 2px 0 rgba(31, 27, 23, .35)); }
+.pg-head h2 { flex: 1; min-width: 0; margin: 0; font-size: 26px; }
+.pg-head h2 .ja, .rs-br .ja { font: 900 14px var(--body); color: var(--sumi2); letter-spacing: .08em; margin-left: var(--s1); }
+.pg-stat { display: inline-flex; align-items: center; gap: var(--s2); padding: var(--s1) var(--s4) var(--s1) var(--s3); min-height: 40px; font: 900 14px var(--body); color: var(--ink);
+  background: var(--grain), var(--paper-0); border: 2px solid var(--ink); border-radius: var(--r-pill); box-shadow: 0 3px 0 var(--ink); }
+.pg-stat .num { font-size: 22px; }
+.pg-sub { display: flex; align-items: center; gap: var(--s4); margin: 0 0 var(--s4); font-size: 13px; font-weight: 700; color: var(--sumi2); line-height: 1.45; }
+.pg-sub > span { flex: 1; min-width: 0; }
+.pg-sub > .meter { flex: 0 0 240px; }
+
+/* ---------------------------------------------------------------- research: one lane per branch, nodes flow left → right */
+.rs-lanes { display: grid; gap: var(--s3); }
+.rs-lane { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: var(--s4); align-items: start; padding: var(--s3); background: var(--grain), var(--paper-2); border: 2px solid var(--ink); border-radius: var(--r-lg); box-shadow: inset 0 3px 0 rgba(31, 27, 23, .1); }
+.rs-br { position: sticky; top: 0; display: grid; justify-items: center; gap: 2px; padding-top: var(--s1); text-align: center; }
+.rs-br > .ico-seal { transform: rotate(-5deg); filter: drop-shadow(0 2px 0 rgba(31, 27, 23, .35)); margin-bottom: var(--s1); }
+.rs-br > b { font: 400 16px var(--display); }
+.rs-br .ja { margin: 0; font-size: 12px; }
+.rs-ct { margin-top: var(--s1); padding: 1px 10px 2px; font: 900 12px var(--body); background: var(--paper-0); border: 2px solid var(--ink); border-radius: var(--r-pill); font-variant-numeric: tabular-nums; }
+.rs-track { --gap: 20px; --cols: 4; display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); gap: var(--s3) var(--gap); }
+#ui-root .node { display: flex; flex-direction: column; gap: var(--s2); margin: 0; padding: var(--s3); font-size: 12px; }
+/* connector: thick ink rail from the previous node, turned matcha once that node is researched */
+/* rails only where the node's single prerequisite is the node just before it (set in r_research), never at a row start */
+#ui-root .rs-track > .node.chain::before { content: ''; position: absolute; left: calc(-1 * var(--gap) - 2px); top: 26px; width: calc(var(--gap) + 2px); height: 5px; background: var(--sumi3); border-block: 1.5px solid var(--ink); }
+#ui-root .rs-track > .node.done + .node.chain::before { background: var(--c-upgrade); }
+#ui-root .rs-track > .node.chain:nth-child(4n+1)::before { display: none; }
+@media (max-width: 1150px) { .rs-track { --cols: 3; } #ui-root .rs-track > .node.chain:nth-child(4n+1)::before { display: block; } #ui-root .rs-track > .node.chain:nth-child(3n+1)::before { display: none; } }
+.node .nd-h { display: flex; align-items: center; gap: var(--s2); min-height: 32px; }
+.node .nm { font: 900 14px/1.2 var(--body); }
+.node .nd-d { flex: 1; color: var(--sumi2); font-weight: 700; line-height: 1.4; }
+.node .nd-f { display: flex; align-items: center; min-height: 32px; }
+.node .nd-f .btn { width: 100%; }
+.node .nd-f .btn b { font: 400 15px var(--display); font-variant-numeric: tabular-nums; }
+.node .nd-ok { font: 900 13px var(--body); color: var(--c-upgrade-ink); display: inline-flex; gap: var(--s1); align-items: center; }
+.node .nd-lock { display: inline-flex; gap: var(--s1); align-items: flex-start; font-weight: 800; color: var(--sumi2); line-height: 1.3; }
+#ui-root .node:is(.avail, .poor) { background: var(--grain), var(--paper-0); }
+#ui-root .node.avail { box-shadow: inset 0 5px 0 var(--pc), 0 0 0 3px rgba(77, 125, 51, .35), var(--sh-1); }
+#ui-root .node.poor { box-shadow: inset 0 5px 0 var(--pc), var(--sh-1); }
+#ui-root .node.locked .ico-seal { filter: grayscale(1) opacity(.45); }
+#ui-root .node.done::after { top: auto; bottom: 8px; right: 10px; }
+#ui-root .node.done .ico-seal { filter: none; }
+
+/* ---------------------------------------------------------------- awards: milestone track + trophy case */
+.aw-wrap { display: grid; grid-template-columns: minmax(250px, 300px) minmax(0, 1fr); gap: var(--s5); align-items: start; }
+.ms-col { position: sticky; top: 0; }
+.ms-col > h3, .aw-ch h3 { margin: 0 0 var(--s3); }
+.ms-track { list-style: none; margin: 0 0 var(--s3); padding: 0; display: grid; gap: var(--s3); }
+#ui-root .ms { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: var(--s3); align-items: center; padding: var(--s2) var(--s3) var(--s2) var(--s2);
+  background: var(--grain), var(--paper-0); border: 2px solid var(--ink); border-radius: var(--r-md); box-shadow: var(--sh-1); }
+.ms + .ms::before { content: ''; position: absolute; left: 25px; top: -16px; width: 5px; height: 18px; background: var(--sumi3); border-inline: 1.5px solid var(--ink); }
+.ms.done + .ms::before { background: var(--c-upgrade); }
+.ms-seal { position: relative; display: grid; place-items: center; }
+.ms-seal .ico-seal { width: 38px; height: 38px; }
+.ms-t { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s2); }
+.ms-t b { font: 900 14px/1.2 var(--body); min-width: 0; }
+.ms-n { flex: none; display: inline-flex; align-items: center; gap: 3px; font: 400 14px var(--display); font-variant-numeric: tabular-nums; }
+.ms-r { font-size: 12px; font-weight: 700; color: var(--sumi2); line-height: 1.35; margin-top: 2px; }
+.ms .meter { margin-top: var(--s2); }
+#ui-root .ms.done { background: var(--grain), var(--c-upgrade-soft); border-color: var(--c-upgrade-ink); }
+/* the 済 stamp sits on the seal's corner, never on the piece count */
+#ui-root .ms.done::after { top: auto; right: auto; left: 30px; bottom: 2px; width: 24px; height: 24px; font-size: 12px; background: var(--paper-0); }
+#ui-root .ms.cur { background: var(--grain), var(--c-money-soft); border-width: 3px; box-shadow: 0 0 0 3px rgba(217, 168, 63, .5), var(--sh-1); }
+#ui-root .ms.locked { background: transparent; border-style: dashed; border-color: var(--sumi3); box-shadow: none; color: var(--sumi2); }
+#ui-root .ms.locked .ico-seal { filter: grayscale(1) opacity(.45); }
+
+.aw-cats { display: grid; gap: var(--s5); }
+.aw-ch { display: flex; align-items: center; gap: var(--s2); }
+.aw-ch h3 { flex: 1; }
+.aw-n { font: 900 13px var(--body); color: var(--sumi2); } .aw-n b { font: 400 18px var(--display); color: var(--ink); }
+.aw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: var(--s3); }
+.aw { --tc: #a4683a; --tc-ink: #5e3416; position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--s1); padding: var(--s5) var(--s2) var(--s3); text-align: center;
+  background: var(--grain), var(--paper-0); border: 2px solid var(--ink); border-radius: var(--r-md); box-shadow: inset 0 5px 0 var(--tc), var(--sh-1); }
+.aw.silver { --tc: #6c747b; --tc-ink: #3d4247; } .aw.gold { --tc: var(--c-money); --tc-ink: var(--kin2); }
+.aw-tier { position: absolute; top: -2px; right: -2px; padding: 3px 8px 4px; font: 900 12px/1 var(--body); color: #fff; background: var(--tc); border: 2px solid var(--ink); border-radius: 0 var(--r-md) 0 var(--r-sm); text-shadow: 0 1px 0 var(--tc-ink); }
+.aw.gold .aw-tier { color: var(--ink); text-shadow: none; }
+.aw-seal { position: relative; display: grid; place-items: center; margin-bottom: var(--s1); }
+.aw-seal .ico-seal { filter: drop-shadow(0 3px 0 rgba(31, 27, 23, .3)); transform: rotate(-4deg); }
+.aw-lock { position: absolute; right: -6px; bottom: -4px; display: grid; place-items: center; width: 24px; height: 24px; color: var(--paper-0); background: var(--ink); border: 2px solid var(--paper-0); border-radius: 50%; }
+.aw-t { font: 900 13.5px/1.2 var(--body); }
+.aw-d { font-size: 12px; font-weight: 700; color: var(--sumi2); line-height: 1.35; }
+.aw-r { margin-top: auto; padding-top: var(--s1); font: 900 12px var(--body); color: var(--c-upgrade-ink); }
+.aw.locked { background: repeating-linear-gradient(135deg, rgba(31, 27, 23, .04) 0 6px, transparent 6px 12px), #ece3d1; border-style: dashed; border-color: var(--sumi3); box-shadow: inset 0 5px 0 var(--tc); }
+.aw.locked .aw-seal .ico-seal { filter: grayscale(1) opacity(.4); }
+.aw.locked .aw-t { color: var(--sumi2); } .aw.locked .aw-r { color: var(--sumi2); }
+
+/* ---------------------------------------------------------------- finances: receipt + upkeep ledger */
+.fin-grid { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); gap: var(--s5); align-items: start; }
+#ui-root .fin-grid .receipt { max-width: none; margin: 0; padding: 26px 24px 30px; color: var(--ink); }
+.receipt .ln > b { font-weight: 900; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#ui-root .receipt .ln.tot { align-items: center; padding: var(--s2) 0; font: 900 15px var(--body); }
+.receipt .ln.tot .num { font-size: 21px; }
+.receipt .ln.tot .num.good { --num-fill: var(--c-upgrade); } .receipt .ln.tot .num.bad { --num-fill: var(--shu); }
+.receipt .ln.inv { color: var(--sumi2); } .receipt .ln.inv i { display: block; font: 700 12px var(--body); font-style: normal; }
+#ui-root .receipt .stamp { top: 20px; right: 20px; font-size: 17px; padding: 6px 10px; border-width: 3px; border-radius: var(--r-sm); box-shadow: inset 0 0 0 2px var(--paper-0), inset 0 0 0 3.5px currentColor; }
+.fin-up .seal-h .btn { flex: none; }
+.fin-tbl, table.stats-tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13.5px; background: var(--paper-0); border: 2px solid var(--ink); border-radius: var(--r-md); overflow: hidden; box-shadow: var(--sh-1); }
+.fin-tbl th, table.stats-tbl th { padding: var(--s2) var(--s3); text-align: right; font: 900 12px var(--body); letter-spacing: .06em; color: var(--sumi2); background: var(--paper-2); border-bottom: 2px solid var(--ink); }
+.fin-tbl td, table.stats-tbl td { padding: 7px var(--s3); text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; border-bottom: 1px solid rgba(31, 27, 23, .12); }
+.fin-tbl :is(th, td):first-child, table.stats-tbl :is(th, td):first-child { text-align: left; }
+/* fixed layout: names ellipsise instead of squeezing to one letter per line */
+.fin-tbl, table.stats-tbl { table-layout: fixed; }
+.fin-tbl td:first-child, table.stats-tbl td:first-child { overflow: hidden; text-overflow: ellipsis; }
+.fin-tbl th:not(:first-child) { width: 21%; } .fin-tbl th:last-child { width: 24%; }
+table.stats-tbl th:not(:first-child) { width: 20%; } table.stats-tbl th:last-child { width: 96px; }
+.fin-tbl tbody tr:nth-child(even) td, table.stats-tbl tr:nth-child(odd) td { background: rgba(231, 216, 187, .3); }
+.fin-tbl td:last-child { color: var(--shu2); font-weight: 900; }
+.fin-tbl tfoot td { font: 400 15px var(--display); background: var(--c-money-soft); border-top: 3px double var(--ink); border-bottom: 0; }
+
+/* ---------------------------------------------------------------- statistics (stats.ts) */
+#ui-root .ledger { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--s5); padding: var(--s2) var(--s4); background: var(--grain), var(--paper-0); border: var(--bw) solid var(--ink); border-radius: var(--r-lg); box-shadow: var(--sh-1); }
+#ui-root .ledger .ln { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3); padding: var(--s2) 0; font-size: 13.5px; font-weight: 800; color: var(--sumi2); border-bottom: 1.5px dashed rgba(31, 27, 23, .2); }
+#ui-root .ledger .ln > b { font: 400 17px var(--display); color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; }
+#ui-root .ledger .ln > b.txt { font: 900 14px var(--body); }
+#ui-root .ledger .ln > b.good { color: var(--c-upgrade-ink); } #ui-root .ledger .ln > b.bad { color: var(--shu2); }
+.stats-h { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s4); margin: var(--s5) 0 var(--s2); }
+.stats-h h3 { margin: 0; }
+.stats-chart { position: relative; height: 200px; background: var(--paper-0); border: var(--bw) solid var(--ink); border-radius: var(--r-lg); box-shadow: var(--sh-1); overflow: hidden; }
+.stats-chart canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.stats-legend { display: inline-flex; flex-wrap: wrap; gap: var(--s3); font: 900 12px var(--body); color: var(--sumi2); }
+.stats-legend i { display: inline-block; width: 12px; height: 12px; margin-right: var(--s1); vertical-align: -1px; border: 2px solid var(--ink); border-radius: 3px; }
+.stats-legend i.ln { height: 6px; vertical-align: 2px; }
+.stats-rec { display: grid; grid-template-columns: 1fr auto; gap: var(--s1) var(--s3); align-items: center; font-size: 13px; font-weight: 800; }
+.stats-rec .meter { grid-column: 1 / -1; margin-bottom: var(--s2); }
+.stats-rec .n { font: 400 14px var(--display); font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------- quests */
+.q-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s4); }
+#ui-root .qc { display: flex; flex-direction: column; gap: var(--s3); padding: var(--s4); }
+.qc-h { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); }
+.qc-h b { font: 400 17px/1.2 var(--display); }
+.qc-d { flex: 1; font-size: 13px; font-weight: 700; color: var(--sumi2); line-height: 1.4; }
+.qc .meter { height: 24px; } .qc .meter > b { font-size: 12.5px; }
+.qc-rw { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.qc-miss { font-size: 13px; font-weight: 800; color: var(--shu2); }
+.qc > .btn { width: 100%; }
+#ui-root .qc.done.p-money { background: var(--grain), var(--c-money-soft); border-color: var(--ink); box-shadow: inset 0 5px 0 var(--c-money), 0 0 0 3px rgba(217, 168, 63, .5), var(--sh-1); }
+#ui-root .qc.claimed { opacity: .72; background: var(--grain), var(--paper-2); box-shadow: none; }
+#ui-root .qc.claimed .mini-stamp { width: 30px; height: 30px; font-size: 15px; border-width: 2.5px; }
+#ui-root .qc.failed { border-style: dashed; border-color: var(--sumi3); box-shadow: none; }
+.q-streak { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s3) var(--s5); margin-top: var(--s4); }
+.q-sl { display: flex; align-items: center; gap: var(--s3); }
+.q-sk { font: 400 17px var(--display); } .q-days { font: 900 13px var(--body); color: var(--sumi2); margin-left: calc(-1 * var(--s2)); } .q-sk .ja { font: 900 13px var(--body); color: var(--sumi2); }
+.q-pips { display: inline-flex; gap: 10px; margin-left: var(--s2); }
+.q-pips i { width: 18px; height: 18px; border: 2.5px solid var(--ink); border-radius: 5px; transform: rotate(45deg); background: var(--paper-2); box-shadow: inset 0 2px 0 rgba(31, 27, 23, .15); }
+.q-pips i.on { background: var(--c-money); box-shadow: inset 0 2px 0 rgba(255, 255, 255, .4); }
+.q-sb { display: grid; justify-items: end; gap: var(--s1); }
+
+.stats-panel > .grid.g2 { align-items: start; }
+.stats-tbl-wrap { max-height: 420px; overflow-y: auto; border: 2px solid var(--ink); border-radius: var(--r-md); }
+#ui-root .stats-tbl-wrap > table.stats-tbl { border: 0; box-shadow: none; border-radius: 0; }
+.stats-tbl-wrap th { position: sticky; top: 0; z-index: 1; }
+
+@media (max-width: 900px) {
+  .rs-track { --cols: 2; }
+  #ui-root .rs-track > .node.chain:is(:nth-child(3n+1), :nth-child(4n+1))::before { display: block; }
+  #ui-root .rs-track > .node.chain:nth-child(2n+1)::before { display: none; }
+  .aw-wrap, .fin-grid { grid-template-columns: 1fr; }
+  .ms-col { position: static; }
+  .q-grid { grid-template-columns: 1fr; }
+  .rs-lane { grid-template-columns: 1fr; }
+  .rs-br { position: static; grid-auto-flow: column; justify-content: start; align-items: center; }
+}
+
+/* .meter sets its own --pc after .p-* in base.css, so re-apply purpose colours on meters */
+.meter.p-money { --pc: var(--c-money); } .meter.p-staff { --pc: var(--c-staff); }

@@ -1,5 +1,5 @@
 // All static game definitions. Pure data — no three.js, no DOM.
-import { SEASONAL_RECIPES } from './seasons';
+import type { IconId } from '../ui/icons';
 
 export const DAY_SECONDS = 600; // real seconds per in-game day
 export const START_MINUTE = 9 * 60;
@@ -12,21 +12,21 @@ export type IngredientId =
   | 'rice' | 'nori' | 'cucumber' | 'salmon' | 'tuna' | 'shrimp'
   | 'avocado' | 'crab' | 'eel' | 'mayo' | 'roe' | 'toro';
 
-export interface IngredientDef { id: IngredientId; name: string; emoji: string; cost: number; color: string }
+export interface IngredientDef { id: IngredientId; name: string; icon: IconId; cost: number; color: string }
 
 export const INGREDIENTS: Record<IngredientId, IngredientDef> = {
-  rice: { id: 'rice', name: 'Sushi Rice', emoji: '🍚', cost: 8, color: '#fbf7ee' },
-  nori: { id: 'nori', name: 'Nori', emoji: '🟩', cost: 6, color: '#1f3a2a' },
-  cucumber: { id: 'cucumber', name: 'Cucumber', emoji: '🥒', cost: 5, color: '#5fae4b' },
-  salmon: { id: 'salmon', name: 'Salmon', emoji: '🐟', cost: 35, color: '#ff8a5c' },
-  tuna: { id: 'tuna', name: 'Tuna', emoji: '🐟', cost: 45, color: '#d9364a' },
-  shrimp: { id: 'shrimp', name: 'Shrimp', emoji: '🦐', cost: 30, color: '#ffb199' },
-  avocado: { id: 'avocado', name: 'Avocado', emoji: '🥑', cost: 20, color: '#a7c957' },
-  crab: { id: 'crab', name: 'Crab', emoji: '🦀', cost: 25, color: '#ff6f59' },
-  eel: { id: 'eel', name: 'Unagi Eel', emoji: '🐍', cost: 70, color: '#7a4a24' },
-  mayo: { id: 'mayo', name: 'Spicy Mayo', emoji: '🌶️', cost: 6, color: '#ff9f43' },
-  roe: { id: 'roe', name: 'Salmon Roe', emoji: '🟠', cost: 55, color: '#ff6b1a' },
-  toro: { id: 'toro', name: 'Fatty Tuna', emoji: '💎', cost: 160, color: '#f48fb1' },
+  rice: { id: 'rice', name: 'Sushi Rice', icon: 'rice', cost: 8, color: '#fbf7ee' },
+  nori: { id: 'nori', name: 'Nori', icon: 'roll', cost: 6, color: '#1f3a2a' },
+  cucumber: { id: 'cucumber', name: 'Cucumber', icon: 'plant', cost: 5, color: '#5fae4b' },
+  salmon: { id: 'salmon', name: 'Salmon', icon: 'fish', cost: 35, color: '#ff8a5c' },
+  tuna: { id: 'tuna', name: 'Tuna', icon: 'fish', cost: 45, color: '#d9364a' },
+  shrimp: { id: 'shrimp', name: 'Shrimp', icon: 'shrimp', cost: 30, color: '#ffb199' },
+  avocado: { id: 'avocado', name: 'Avocado', icon: 'plant', cost: 20, color: '#a7c957' },
+  crab: { id: 'crab', name: 'Crab', icon: 'shrimp', cost: 25, color: '#ff6f59' },
+  eel: { id: 'eel', name: 'Unagi Eel', icon: 'fish', cost: 70, color: '#7a4a24' },
+  mayo: { id: 'mayo', name: 'Spicy Mayo', icon: 'fire', cost: 6, color: '#ff9f43' },
+  roe: { id: 'roe', name: 'Salmon Roe', icon: 'gem', cost: 55, color: '#ff6b1a' },
+  toro: { id: 'toro', name: 'Fatty Tuna', icon: 'fish', cost: 160, color: '#f48fb1' },
 };
 export const INGREDIENT_IDS = Object.keys(INGREDIENTS) as IngredientId[];
 
@@ -56,7 +56,15 @@ export const RECIPES: Record<string, RecipeDef> = {
   toro_nigiri: { id: 'toro_nigiri', name: 'Fatty Tuna Nigiri', jp: '大トロ', price: 520, ingredients: { rice: 1, toro: 1 }, prep: 5, kind: 'nigiri', premium: true, topColor: '#f48fb1' },
   chefs_special: { id: 'chefs_special', name: "Chef's Special Platter", jp: 'おまかせ', price: 980, ingredients: { rice: 1, salmon: 1, tuna: 1, toro: 1, roe: 1 }, prep: 9, kind: 'platter', premium: true, topColor: '#ffd166' },
 };
-Object.assign(RECIPES, SEASONAL_RECIPES); // limited-time recipes, only orderable while in season
+export const RECIPE_IDS = Object.keys(RECIPES); // the permanent menu
+// Legacy seasonal recipes: never offered any more, kept only so old saves that sold them still load.
+Object.assign(RECIPES, {
+  sakura_ebi_nigiri: { id: 'sakura_ebi_nigiri', name: 'Sakura Shrimp Nigiri', jp: '桜えび', price: 170, ingredients: { rice: 1, shrimp: 1 }, prep: 4, kind: 'nigiri', topColor: '#f7a1b5' },
+  matsuri_temaki: { id: 'matsuri_temaki', name: 'Festival Crab Roll', jp: '祭り巻き', price: 190, ingredients: { rice: 1, nori: 1, crab: 1, cucumber: 1, mayo: 1 }, prep: 4.5, kind: 'roll', topColor: '#ff6f59' },
+  momiji_gunkan: { id: 'momiji_gunkan', name: 'Autumn Oyako Gunkan', jp: '紅葉軍艦', price: 320, ingredients: { rice: 1, nori: 1, salmon: 1, roe: 1 }, prep: 5, kind: 'gunkan', topColor: '#e8590c' },
+  yuki_roll: { id: 'yuki_roll', name: 'Snowfall Crab Roll', jp: '雪巻き', price: 220, ingredients: { rice: 1, nori: 1, crab: 1, avocado: 1, mayo: 1 }, prep: 5, kind: 'roll', topColor: '#eef2f7' },
+  osechi_platter: { id: 'osechi_platter', name: 'New Year Osechi Platter', jp: 'お節', price: 1100, ingredients: { rice: 1, toro: 1, roe: 1, eel: 1, shrimp: 1 }, prep: 9, kind: 'platter', premium: true, topColor: '#c92a2a' },
+} satisfies Record<string, RecipeDef>);
 export const START_RECIPES = ['cucumber_maki', 'salmon_nigiri'];
 
 export function recipeCost(r: RecipeDef, costMult = 1): number {
@@ -69,7 +77,7 @@ export function recipeCost(r: RecipeDef, costMult = 1): number {
 export type CustomerType = 'student' | 'office' | 'tourist' | 'family' | 'foodie' | 'wealthy' | 'influencer' | 'critic' | 'vip';
 
 export interface CustomerDef {
-  id: CustomerType; name: string; emoji: string;
+  id: CustomerType; name: string; icon: IconId;
   priceTolerance: number; // how much above base price they accept (1 = base)
   patience: number; // seconds willing to wait in total
   orderMin: number; orderMax: number;
@@ -81,15 +89,15 @@ export interface CustomerDef {
 }
 
 export const CUSTOMERS: Record<CustomerType, CustomerDef> = {
-  student: { id: 'student', name: 'Student', emoji: '🎒', priceTolerance: 0.9, patience: 70, orderMin: 1, orderMax: 3, qualityExpect: 0.3, tipRate: 0.02, prefers: ['cucumber_maki', 'california_roll', 'spicy_tuna_roll'], hours: [[14, 18], [20, 24]], repWeight: 1 },
-  office: { id: 'office', name: 'Office Worker', emoji: '💼', priceTolerance: 1.1, patience: 55, orderMin: 2, orderMax: 4, qualityExpect: 0.45, tipRate: 0.05, prefers: ['salmon_nigiri', 'tuna_nigiri', 'tuna_maki'], hours: [[11, 14], [18, 21]], repWeight: 1 },
-  tourist: { id: 'tourist', name: 'Tourist', emoji: '📸', priceTolerance: 1.3, patience: 90, orderMin: 2, orderMax: 5, qualityExpect: 0.4, tipRate: 0.1, prefers: ['california_roll', 'salmon_nigiri', 'dragon_roll', 'rainbow_roll'], hours: [[9, 20]], repWeight: 1.2 },
-  family: { id: 'family', name: 'Family', emoji: '👨‍👩‍👧', priceTolerance: 1.0, patience: 80, orderMin: 4, orderMax: 8, qualityExpect: 0.4, tipRate: 0.05, prefers: ['cucumber_maki', 'salmon_nigiri', 'shrimp_nigiri', 'california_roll'], hours: [[11, 14], [17, 21]], repWeight: 1 },
-  foodie: { id: 'foodie', name: 'Food Enthusiast', emoji: '🍽️', priceTolerance: 1.5, patience: 100, orderMin: 2, orderMax: 5, qualityExpect: 0.7, tipRate: 0.12, prefers: ['eel_nigiri', 'roe_gunkan', 'toro_nigiri', 'dragon_roll'], hours: [[12, 23]], repWeight: 1.6 },
-  wealthy: { id: 'wealthy', name: 'Wealthy Diner', emoji: '💎', priceTolerance: 2.2, patience: 90, orderMin: 3, orderMax: 6, qualityExpect: 0.75, tipRate: 0.15, prefers: ['toro_nigiri', 'chefs_special', 'roe_gunkan', 'eel_nigiri'], hours: [[18, 24]], repWeight: 1.5 },
-  influencer: { id: 'influencer', name: 'Influencer', emoji: '🤳', priceTolerance: 1.4, patience: 60, orderMin: 2, orderMax: 4, qualityExpect: 0.6, tipRate: 0.08, prefers: ['rainbow_roll', 'dragon_roll', 'spicy_tuna_roll'], hours: [[12, 22]], repWeight: 3 },
-  critic: { id: 'critic', name: 'Food Critic', emoji: '📝', priceTolerance: 1.8, patience: 90, orderMin: 3, orderMax: 5, qualityExpect: 0.85, tipRate: 0.05, prefers: [], hours: [[12, 21]], repWeight: 6 },
-  vip: { id: 'vip', name: 'VIP Guest', emoji: '👑', priceTolerance: 3, patience: 140, orderMin: 4, orderMax: 8, qualityExpect: 0.8, tipRate: 0.3, prefers: ['chefs_special', 'toro_nigiri', 'dragon_roll', 'rainbow_roll'], hours: [[11, 23]], repWeight: 4 },
+  student: { id: 'student', name: 'Student', icon: 'backpack', priceTolerance: 0.9, patience: 70, orderMin: 1, orderMax: 3, qualityExpect: 0.3, tipRate: 0.02, prefers: ['cucumber_maki', 'california_roll', 'spicy_tuna_roll'], hours: [[14, 18], [20, 24]], repWeight: 1 },
+  office: { id: 'office', name: 'Office Worker', icon: 'briefcase', priceTolerance: 1.1, patience: 55, orderMin: 2, orderMax: 4, qualityExpect: 0.45, tipRate: 0.05, prefers: ['salmon_nigiri', 'tuna_nigiri', 'tuna_maki'], hours: [[11, 14], [18, 21]], repWeight: 1 },
+  tourist: { id: 'tourist', name: 'Tourist', icon: 'camera', priceTolerance: 1.3, patience: 90, orderMin: 2, orderMax: 5, qualityExpect: 0.4, tipRate: 0.1, prefers: ['california_roll', 'salmon_nigiri', 'dragon_roll', 'rainbow_roll'], hours: [[9, 20]], repWeight: 1.2 },
+  family: { id: 'family', name: 'Family', icon: 'team', priceTolerance: 1.0, patience: 80, orderMin: 4, orderMax: 8, qualityExpect: 0.4, tipRate: 0.05, prefers: ['cucumber_maki', 'salmon_nigiri', 'shrimp_nigiri', 'california_roll'], hours: [[11, 14], [17, 21]], repWeight: 1 },
+  foodie: { id: 'foodie', name: 'Food Enthusiast', icon: 'dish', priceTolerance: 1.5, patience: 100, orderMin: 2, orderMax: 5, qualityExpect: 0.7, tipRate: 0.12, prefers: ['eel_nigiri', 'roe_gunkan', 'toro_nigiri', 'dragon_roll'], hours: [[12, 23]], repWeight: 1.6 },
+  wealthy: { id: 'wealthy', name: 'Wealthy Diner', icon: 'gem', priceTolerance: 2.2, patience: 90, orderMin: 3, orderMax: 6, qualityExpect: 0.75, tipRate: 0.15, prefers: ['toro_nigiri', 'chefs_special', 'roe_gunkan', 'eel_nigiri'], hours: [[18, 24]], repWeight: 1.5 },
+  influencer: { id: 'influencer', name: 'Influencer', icon: 'phone', priceTolerance: 1.4, patience: 60, orderMin: 2, orderMax: 4, qualityExpect: 0.6, tipRate: 0.08, prefers: ['rainbow_roll', 'dragon_roll', 'spicy_tuna_roll'], hours: [[12, 22]], repWeight: 3 },
+  critic: { id: 'critic', name: 'Food Critic', icon: 'note', priceTolerance: 1.8, patience: 90, orderMin: 3, orderMax: 5, qualityExpect: 0.85, tipRate: 0.05, prefers: [], hours: [[12, 21]], repWeight: 6 },
+  vip: { id: 'vip', name: 'VIP Guest', icon: 'crown', priceTolerance: 3, patience: 140, orderMin: 4, orderMax: 8, qualityExpect: 0.8, tipRate: 0.3, prefers: ['chefs_special', 'toro_nigiri', 'dragon_roll', 'rainbow_roll'], hours: [[11, 23]], repWeight: 4 },
 };
 
 // ---------------------------------------------------------------- districts & properties
@@ -105,10 +113,10 @@ export interface DistrictDef {
 }
 
 export const DISTRICTS: Record<DistrictId, DistrictDef> = {
-  asakusa: { id: 'asakusa', name: 'Asakusa', jp: '浅草', blurb: 'Cozy old-town streets near the great temple gate. Where it all begins.', traffic: 7, elasticity: 1.4, unlock: { pieces: 0, cost: 0 }, mix: { student: 2, office: 2, tourist: 3, family: 2, foodie: 1 }, palette: { ground: '#d9c7a7', accent: '#c0392b', sky: '#8fd3ff' } },
-  shibuya: { id: 'shibuya', name: 'Shibuya', jp: '渋谷', blurb: 'Neon, giant screens and the world\'s busiest crossing. Young crowds, huge volume.', traffic: 9, elasticity: 1.6, unlock: { pieces: 1_000, cost: 25_000 }, mix: { student: 4, influencer: 1, tourist: 3, office: 2, foodie: 1 }, palette: { ground: '#9aa0ad', accent: '#ff3e9a', sky: '#9ad0ff' } },
-  shinjuku: { id: 'shinjuku', name: 'Shinjuku', jp: '新宿', blurb: 'Skyscrapers and salarymen. Massive lunch and dinner rushes, pricey rent.', traffic: 8, elasticity: 1.2, unlock: { pieces: 10_000, cost: 250_000 }, mix: { office: 6, tourist: 2, foodie: 1, student: 1, wealthy: 1 }, palette: { ground: '#8f97a3', accent: '#3fa7ff', sky: '#a5c8ef' } },
-  ginza: { id: 'ginza', name: 'Ginza', jp: '銀座', blurb: 'Luxury boutiques and gold-leaf elegance. Fewer guests who pay far more.', traffic: 4.5, elasticity: 0.6, unlock: { pieces: 50_000, cost: 2_000_000 }, mix: { wealthy: 5, foodie: 3, tourist: 2, critic: 0.4, office: 1 }, palette: { ground: '#e4ddd0', accent: '#c9a227', sky: '#b9d9f5' } },
+  asakusa: { id: 'asakusa', name: 'Asakusa', jp: '浅草', blurb: 'Temple visitors and regulars share the counters around the morning market.', traffic: 7, elasticity: 1.4, unlock: { pieces: 0, cost: 0 }, mix: { student: 2, office: 2, tourist: 3, family: 2, foodie: 1 }, palette: { ground: '#d9c7a7', accent: '#c0392b', sky: '#8fd3ff' } },
+  shibuya: { id: 'shibuya', name: 'Shibuya', jp: '渋谷', blurb: 'A rush of shoppers and students between the station, the crossing, and Center Street.', traffic: 9, elasticity: 1.6, unlock: { pieces: 1_000, cost: 25_000 }, mix: { student: 4, influencer: 1, tourist: 3, office: 2, foodie: 1 }, palette: { ground: '#9aa0ad', accent: '#ff3e9a', sky: '#9ad0ff' } },
+  shinjuku: { id: 'shinjuku', name: 'Shinjuku', jp: '新宿', blurb: 'Office workers fill the counters at lunch. Rent climbs near the station.', traffic: 8, elasticity: 1.2, unlock: { pieces: 10_000, cost: 250_000 }, mix: { office: 6, tourist: 2, foodie: 1, student: 1, wealthy: 1 }, palette: { ground: '#8f97a3', accent: '#3fa7ff', sky: '#a5c8ef' } },
+  ginza: { id: 'ginza', name: 'Ginza', jp: '銀座', blurb: 'Quiet dining rooms off Chuo-dori draw fewer guests, and they spend more per visit.', traffic: 4.5, elasticity: 0.6, unlock: { pieces: 50_000, cost: 2_000_000 }, mix: { wealthy: 5, foodie: 3, tourist: 2, critic: 0.4, office: 1 }, palette: { ground: '#e4ddd0', accent: '#c9a227', sky: '#b9d9f5' } },
 };
 export const DISTRICT_IDS = Object.keys(DISTRICTS) as DistrictId[];
 
@@ -159,7 +167,7 @@ export const isWalkable = (id: string): id is DistrictId => (DISTRICT_IDS as str
 // ---------------------------------------------------------------- restaurant concepts (formats)
 export type ConceptId = 'stand' | 'kiosk' | 'bar' | 'kaiten' | 'omakase' | 'ghost';
 export interface ConceptDef {
-  id: ConceptId; name: string; jp: string; emoji: string; desc: string;
+  id: ConceptId; name: string; jp: string; icon: IconId; desc: string;
   traffic: number; elasticity: number; price: number; // bill multiplier (the concept's price level)
   cook: number; quality: number; staff: number; // chef-slot multiplier
   rent: number; fitout: number; // fit-out cost as a fraction of the lot price
@@ -167,12 +175,12 @@ export interface ConceptDef {
   mix?: Partial<Record<CustomerType, number>>;
 }
 export const CONCEPTS: Record<ConceptId, ConceptDef> = {
-  stand: { id: 'stand', name: 'Yatai Stand', jp: '屋台', emoji: '🏮', desc: 'A street stand. Cheap, charming and personal.', traffic: 1, elasticity: 1, price: 1, cook: 1, quality: 0, staff: 1, rent: 1, fitout: 0, walkIn: true, needsServer: true, unlockPieces: 0 },
-  kiosk: { id: 'kiosk', name: 'Takeout Kiosk', jp: '持ち帰り', emoji: '🥡', desc: 'Grab-and-go packs. Fast, cheap, high volume, price-sensitive.', traffic: 1.35, elasticity: 1.35, price: 0.85, cook: 1.15, quality: -0.05, staff: 1, rent: 0.7, fitout: 0.15, walkIn: true, needsServer: true, unlockPieces: 0, mix: { student: 2, office: 2 } },
-  bar: { id: 'bar', name: 'Sushi Bar', jp: '寿司屋', emoji: '🍣', desc: 'The classic counter. Balanced in every way.', traffic: 1, elasticity: 1, price: 1, cook: 1, quality: 0, staff: 1, rent: 1, fitout: 0.2, walkIn: true, needsServer: true, unlockPieces: 0 },
-  kaiten: { id: 'kaiten', name: 'Kaiten Conveyor', jp: '回転寿司', emoji: '🔄', desc: 'Plates circle on a belt. Huge volume, low prices, needs big kitchens.', traffic: 1.55, elasticity: 1.5, price: 0.8, cook: 1.2, quality: -0.08, staff: 1.3, rent: 1.15, fitout: 0.35, walkIn: true, needsServer: true, unlockPieces: 5_000, mix: { family: 3, student: 2 } },
-  omakase: { id: 'omakase', name: 'Omakase Room', jp: 'おまかせ', emoji: '🎎', desc: 'Chef’s choice for a handful of guests. Tiny volume, enormous bills, needs master chefs.', traffic: 0.25, elasticity: 0.45, price: 1.4, cook: 0.7, quality: 0.12, staff: 0.75, rent: 1.25, fitout: 0.5, walkIn: true, needsServer: true, unlockPieces: 50_000, mix: { wealthy: 4, foodie: 3, critic: 0.3 } },
-  ghost: { id: 'ghost', name: 'Ghost Kitchen', jp: 'デリバリー', emoji: '🛵', desc: 'Delivery-only kitchen. No dining room, no servers, cheap rent.', traffic: 1.1, elasticity: 1.2, price: 0.95, cook: 1.0, quality: -0.03, staff: 1.25, rent: 0.45, fitout: 0.25, walkIn: false, needsServer: false, unlockPieces: 10_000, mix: { office: 2, student: 2 } },
+  stand: { id: 'stand', name: 'Yatai Stand', jp: '屋台', icon: 'lantern', desc: 'A street stand. Cheap, charming and personal.', traffic: 1, elasticity: 1, price: 1, cook: 1, quality: 0, staff: 1, rent: 1, fitout: 0, walkIn: true, needsServer: true, unlockPieces: 0 },
+  kiosk: { id: 'kiosk', name: 'Takeout Kiosk', jp: '持ち帰り', icon: 'takeout', desc: 'Grab-and-go packs. Fast, cheap, high volume, price-sensitive.', traffic: 1.35, elasticity: 1.35, price: 0.85, cook: 1.15, quality: -0.05, staff: 1, rent: 0.7, fitout: 0.15, walkIn: true, needsServer: true, unlockPieces: 0, mix: { student: 2, office: 2 } },
+  bar: { id: 'bar', name: 'Sushi Bar', jp: '寿司屋', icon: 'noren', desc: 'The classic counter. Balanced in every way.', traffic: 1, elasticity: 1, price: 1, cook: 1, quality: 0, staff: 1, rent: 1, fitout: 0.2, walkIn: true, needsServer: true, unlockPieces: 0 },
+  kaiten: { id: 'kaiten', name: 'Kaiten Conveyor', jp: '回転寿司', icon: 'conveyor', desc: 'Plates circle on a belt. Huge volume, low prices, needs big kitchens.', traffic: 1.55, elasticity: 1.5, price: 0.8, cook: 1.2, quality: -0.08, staff: 1.3, rent: 1.15, fitout: 0.35, walkIn: true, needsServer: true, unlockPieces: 5_000, mix: { family: 3, student: 2 } },
+  omakase: { id: 'omakase', name: 'Omakase Room', jp: 'おまかせ', icon: 'chopsticks', desc: 'Chef’s choice for a handful of guests. Tiny volume, enormous bills, needs master chefs.', traffic: 0.25, elasticity: 0.45, price: 1.4, cook: 0.7, quality: 0.12, staff: 0.75, rent: 1.25, fitout: 0.5, walkIn: true, needsServer: true, unlockPieces: 50_000, mix: { wealthy: 4, foodie: 3, critic: 0.3 } },
+  ghost: { id: 'ghost', name: 'Ghost Kitchen', jp: 'デリバリー', icon: 'scooter', desc: 'Delivery-only kitchen. No dining room, no servers, cheap rent.', traffic: 1.1, elasticity: 1.2, price: 0.95, cook: 1.0, quality: -0.03, staff: 1.25, rent: 0.45, fitout: 0.25, walkIn: false, needsServer: false, unlockPieces: 10_000, mix: { office: 2, student: 2 } },
 };
 export const CONCEPT_IDS = Object.keys(CONCEPTS) as ConceptId[];
 
@@ -223,22 +231,21 @@ export const PROPERTY_IDS = Object.keys(PROPERTIES);
 export type UpgradeCategory = 'kitchen' | 'dining' | 'decor' | 'operations';
 
 export interface UpgradeDef {
-  id: string; name: string; category: UpgradeCategory; emoji: string;
+  id: string; name: string; category: UpgradeCategory; icon: IconId;
   max: number; base: number; growth: number; desc: string;
 }
 
 export const UPGRADES: Record<string, UpgradeDef> = {
-  station: { id: 'station', name: 'Prep Station', category: 'kitchen', emoji: '🔪', max: 4, base: 5_000, growth: 3.5, desc: '+20% cooking speed per level (you and chefs).' },
-  fridge: { id: 'fridge', name: 'Refrigerated Case', category: 'kitchen', emoji: '🧊', max: 3, base: 4_000, growth: 3, desc: 'Fresher fish: +6% food quality per level.' },
-  extra_station: { id: 'extra_station', name: 'Extra Chef Station', category: 'kitchen', emoji: '👨‍🍳', max: 3, base: 40_000, growth: 3.8, desc: '+1 chef slot per level (up to property limit +3).' },
-  expand: { id: 'expand', name: 'Renovate & Expand', category: 'dining', emoji: '🏗️', max: 3, base: 0, growth: 3.5, desc: '+25% guest capacity & foot traffic, +2 chef slots per level. A bigger, grander restaurant.' },
-  seats: { id: 'seats', name: 'Seating', category: 'dining', emoji: '🪑', max: 5, base: 3_000, growth: 2.2, desc: 'More seats: more guests at once and +patience.' },
-  lanterns: { id: 'lanterns', name: 'Paper Lanterns', category: 'decor', emoji: '🏮', max: 3, base: 1_500, growth: 2.5, desc: '+Atmosphere. Glows warmly at night.' },
-  plants: { id: 'plants', name: 'Bonsai & Plants', category: 'decor', emoji: '🪴', max: 3, base: 2_000, growth: 2.5, desc: '+Atmosphere and +cleanliness feel.' },
-  sign: { id: 'sign', name: 'Neon Sign', category: 'decor', emoji: '💡', max: 3, base: 8_000, growth: 3.5, desc: '+15% foot traffic per level. Pedestrians notice you.' },
-  register: { id: 'register', name: 'Fast Register', category: 'operations', emoji: '🧾', max: 3, base: 3_000, growth: 2.8, desc: 'Orders taken faster, guests wait less (+15% patience).' },
-  delivery: { id: 'delivery', name: 'Delivery Fleet', category: 'operations', emoji: '🛵', max: 4, base: 80_000, growth: 3.6, desc: '+15% orders per level from delivery apps. Scooters park out front.' },
-  cleaning: { id: 'cleaning', name: 'Cleaning Kit', category: 'operations', emoji: '🧽', max: 3, base: 2_000, growth: 2.5, desc: 'Restaurant gets dirty 25% slower per level.' },
+  station: { id: 'station', name: 'Prep Station', category: 'kitchen', icon: 'knife', max: 4, base: 5_000, growth: 3.5, desc: '+20% chef cooking speed per level.' },
+  fridge: { id: 'fridge', name: 'Refrigerated Case', category: 'kitchen', icon: 'ice', max: 3, base: 4_000, growth: 3, desc: 'Fresher fish: +6% food quality per level.' },
+  extra_station: { id: 'extra_station', name: 'Extra Chef Station', category: 'kitchen', icon: 'chef', max: 3, base: 40_000, growth: 3.8, desc: '+1 chef slot per level (up to property limit +3).' },
+  expand: { id: 'expand', name: 'Renovate & Expand', category: 'dining', icon: 'tools', max: 3, base: 0, growth: 3.5, desc: '+25% guest capacity & foot traffic, +2 chef slots per level. A bigger, grander restaurant.' },
+  seats: { id: 'seats', name: 'Seating', category: 'dining', icon: 'chair', max: 5, base: 3_000, growth: 2.2, desc: 'More seats: more guests at once and +patience.' },
+  lanterns: { id: 'lanterns', name: 'Paper Lanterns', category: 'decor', icon: 'lantern', max: 3, base: 1_500, growth: 2.5, desc: '+Atmosphere. Glows warmly at night.' },
+  plants: { id: 'plants', name: 'Bonsai & Plants', category: 'decor', icon: 'plant', max: 3, base: 2_000, growth: 2.5, desc: '+Atmosphere. Greenery guests linger over.' },
+  sign: { id: 'sign', name: 'Neon Sign', category: 'decor', icon: 'bulb', max: 3, base: 8_000, growth: 3.5, desc: '+15% foot traffic per level. Pedestrians notice you.' },
+  register: { id: 'register', name: 'Fast Register', category: 'operations', icon: 'receipt', max: 3, base: 3_000, growth: 2.8, desc: 'Orders taken faster, guests wait less (+15% patience).' },
+  delivery: { id: 'delivery', name: 'Delivery Fleet', category: 'operations', icon: 'scooter', max: 4, base: 80_000, growth: 3.6, desc: '+15% orders per level from delivery apps. Scooters park out front.' },
 };
 
 export function upgradeCost(u: UpgradeDef, level: number, sizeMult = 1): number {
@@ -246,15 +253,14 @@ export function upgradeCost(u: UpgradeDef, level: number, sizeMult = 1): number 
 }
 
 // ---------------------------------------------------------------- staff
-export type Role = 'chef' | 'server' | 'cleaner' | 'manager';
+export type Role = 'chef' | 'server' | 'manager';
 
-export interface RoleDef { id: Role; name: string; emoji: string; baseWage: number; hireCost: number; desc: string; unlockPieces: number }
+export interface RoleDef { id: Role; name: string; icon: IconId; baseWage: number; hireCost: number; desc: string; unlockPieces: number }
 
 export const ROLES: Record<Role, RoleDef> = {
-  chef: { id: 'chef', name: 'Sushi Chef', emoji: '👨‍🍳', baseWage: 900, hireCost: 3_000, desc: 'Cooks accepted orders automatically. Skill = speed & quality.', unlockPieces: 0 },
-  server: { id: 'server', name: 'Server / Cashier', emoji: '🧑‍💼', baseWage: 700, hireCost: 2_000, desc: 'Takes orders and serves food. Chef + Server = full automation.', unlockPieces: 0 },
-  cleaner: { id: 'cleaner', name: 'Cleaner', emoji: '🧹', baseWage: 500, hireCost: 2_000, desc: 'Keeps the restaurant spotless. Dirty restaurants lose guests.', unlockPieces: 0 },
-  manager: { id: 'manager', name: 'Manager', emoji: '📋', baseWage: 3_000, hireCost: 25_000, desc: 'Runs the place while you are away: offline earnings, auto-restock, and auto-hire / smart-pricing policies.', unlockPieces: 500 },
+  chef: { id: 'chef', name: 'Sushi Chef', icon: 'chef', baseWage: 900, hireCost: 3_000, desc: 'Cooks every order. No chef, no sales. Skill = speed & quality.', unlockPieces: 0 },
+  server: { id: 'server', name: 'Server / Cashier', icon: 'server', baseWage: 700, hireCost: 2_000, desc: 'Takes orders and serves guests. Without one the chef also works the counter, slower.', unlockPieces: 0 },
+  manager: { id: 'manager', name: 'Manager', icon: 'clipboard', baseWage: 3_000, hireCost: 25_000, desc: 'Runs the restaurant itself: hires missing or overloaded staff, adjusts prices, covers the counter and earns while you are away.', unlockPieces: 500 },
 };
 
 export function wageFor(role: Role, skill: number): number {
@@ -266,63 +272,61 @@ export function trainCost(role: Role, skill: number): number {
 export const MAX_SKILL = 10;
 
 // ---------------------------------------------------------------- marketing
-export interface CampaignDef { id: string; name: string; emoji: string; cost: number; days: number; boost: number; scope: 'district' | 'city' | 'global'; brand: number; requires?: string; desc: string }
+export interface CampaignDef { id: string; name: string; icon: IconId; cost: number; days: number; boost: number; scope: 'district' | 'city' | 'global'; brand: number; requires?: string; desc: string }
 
 export const CAMPAIGNS: Record<string, CampaignDef> = {
-  flyers: { id: 'flyers', name: 'Hand Out Flyers', emoji: '📄', cost: 800, days: 1, boost: 0.25, scope: 'district', brand: 0.5, desc: '+25% guests in your current district for 1 day.' },
-  newspaper: { id: 'newspaper', name: 'Local Newspaper Ad', emoji: '📰', cost: 20_000, days: 2, boost: 0.3, scope: 'city', brand: 1, desc: '+30% guests in all of Tokyo for 2 days.' },
-  social: { id: 'social', name: 'Social Media Campaign', emoji: '📱', cost: 120_000, days: 3, boost: 0.5, scope: 'city', brand: 2, requires: 'social_media', desc: '+50% guests citywide for 3 days. Attracts students.' },
-  influencer: { id: 'influencer', name: 'Influencer Partnership', emoji: '🤳', cost: 600_000, days: 3, boost: 0.8, scope: 'city', brand: 4, requires: 'influencer_network', desc: '+80% guests citywide for 3 days. Influencers visit.' },
-  billboard: { id: 'billboard', name: 'Shibuya Billboard', emoji: '📺', cost: 3_000_000, days: 5, boost: 0.7, scope: 'city', brand: 6, requires: 'brand_story', desc: '+70% guests citywide for 5 days and big brand boost.' },
-  tv: { id: 'tv', name: 'National TV Spot', emoji: '🎬', cost: 20_000_000, days: 5, boost: 1.2, scope: 'global', brand: 10, requires: 'chapter2', desc: '+120% guests and franchise output for 5 days.' },
-  global: { id: 'global', name: 'International Brand Campaign', emoji: '🌏', cost: 80_000_000, days: 7, boost: 1.5, scope: 'global', brand: 15, requires: 'global_logistics', desc: '+150% everywhere for 7 days, including franchises.' },
+  flyers: { id: 'flyers', name: 'Hand Out Flyers', icon: 'paper', cost: 800, days: 1, boost: 0.25, scope: 'district', brand: 0.5, desc: '+25% guests in your current district for 1 day.' },
+  newspaper: { id: 'newspaper', name: 'Local Newspaper Ad', icon: 'newspaper', cost: 20_000, days: 2, boost: 0.3, scope: 'city', brand: 1, desc: '+30% guests in all of Tokyo for 2 days.' },
+  social: { id: 'social', name: 'Social Media Campaign', icon: 'phone', cost: 120_000, days: 3, boost: 0.5, scope: 'city', brand: 2, requires: 'social_media', desc: '+50% guests citywide for 3 days. Attracts students.' },
+  influencer: { id: 'influencer', name: 'Influencer Partnership', icon: 'camera', cost: 600_000, days: 3, boost: 0.8, scope: 'city', brand: 4, requires: 'influencer_network', desc: '+80% guests citywide for 3 days. Influencers visit.' },
+  billboard: { id: 'billboard', name: 'Shibuya Billboard', icon: 'tv', cost: 3_000_000, days: 5, boost: 0.7, scope: 'city', brand: 6, requires: 'brand_story', desc: '+70% guests citywide for 5 days and big brand boost.' },
+  tv: { id: 'tv', name: 'National TV Spot', icon: 'clapper', cost: 20_000_000, days: 5, boost: 1.2, scope: 'global', brand: 10, requires: 'chapter2', desc: '+120% guests and franchise output for 5 days.' },
+  global: { id: 'global', name: 'International Brand Campaign', icon: 'globe', cost: 80_000_000, days: 7, boost: 1.5, scope: 'global', brand: 15, requires: 'global_logistics', desc: '+150% everywhere for 7 days, including franchises.' },
 };
 
 // ---------------------------------------------------------------- research
 export interface ResearchDef {
-  id: string; name: string; emoji: string; branch: 'cooking' | 'supply' | 'staff' | 'marketing' | 'recipes' | 'empire';
+  id: string; name: string; icon: IconId; branch: 'cooking' | 'supply' | 'staff' | 'marketing' | 'recipes' | 'empire';
   cost: number; // research points
   requires: string[]; minPieces: number; desc: string;
   unlockRecipe?: string;
 }
 
 export const RESEARCH: Record<string, ResearchDef> = {
-  knife_skills: { id: 'knife_skills', name: 'Knife Skills', emoji: '🔪', branch: 'cooking', cost: 10, requires: [], minPieces: 0, desc: '+15% cooking speed everywhere.' },
-  rice_science: { id: 'rice_science', name: 'Rice Science', emoji: '🍚', branch: 'cooking', cost: 40, requires: ['knife_skills'], minPieces: 0, desc: '+8% food quality everywhere.' },
-  conveyor: { id: 'conveyor', name: 'Conveyor Belt Kitchens', emoji: '🔄', branch: 'cooking', cost: 600, requires: ['rice_science'], minPieces: 20_000, desc: '+30% cooking speed everywhere.' },
-  robot_assist: { id: 'robot_assist', name: 'Robot Rice Formers', emoji: '🤖', branch: 'cooking', cost: 20_000, requires: ['conveyor'], minPieces: 1_000_000, desc: '+50% cooking speed everywhere.' },
+  knife_skills: { id: 'knife_skills', name: 'Knife Skills', icon: 'knife', branch: 'cooking', cost: 10, requires: [], minPieces: 0, desc: '+15% cooking speed everywhere.' },
+  rice_science: { id: 'rice_science', name: 'Rice Science', icon: 'rice', branch: 'cooking', cost: 40, requires: ['knife_skills'], minPieces: 0, desc: '+8% food quality everywhere.' },
+  conveyor: { id: 'conveyor', name: 'Conveyor Belt Kitchens', icon: 'conveyor', branch: 'cooking', cost: 600, requires: ['rice_science'], minPieces: 20_000, desc: '+30% cooking speed everywhere.' },
+  robot_assist: { id: 'robot_assist', name: 'Robot Rice Formers', icon: 'gear', branch: 'cooking', cost: 20_000, requires: ['conveyor'], minPieces: 1_000_000, desc: '+50% cooking speed everywhere.' },
 
-  bulk_buying: { id: 'bulk_buying', name: 'Bulk Buying', emoji: '📦', branch: 'supply', cost: 15, requires: [], minPieces: 0, desc: '-10% ingredient costs.' },
-  phone_orders: { id: 'phone_orders', name: 'Supplier Hotline', emoji: '☎️', branch: 'supply', cost: 30, requires: ['bulk_buying'], minPieces: 0, desc: 'Order ingredients from the management menu anywhere.' },
-  auto_restock: { id: 'auto_restock', name: 'Scheduled Deliveries', emoji: '🚚', branch: 'supply', cost: 80, requires: ['phone_orders'], minPieces: 0, desc: 'Ingredients automatically restocked to your targets.' },
-  cold_chain: { id: 'cold_chain', name: 'Cold Chain Warehouse', emoji: '🏭', branch: 'supply', cost: 1_000, requires: ['auto_restock'], minPieces: 10_000, desc: '+1000 storage and -10% ingredient costs.' },
-  supply_contracts: { id: 'supply_contracts', name: 'Long-term Supplier Contracts', emoji: '🤝', branch: 'supply', cost: 8_000, requires: ['cold_chain'], minPieces: 250_000, desc: '-15% ingredient costs. Shortages hurt half as much.' },
+  bulk_buying: { id: 'bulk_buying', name: 'Bulk Buying', icon: 'box', branch: 'supply', cost: 15, requires: [], minPieces: 0, desc: '-10% ingredient costs.' },
+  cold_chain: { id: 'cold_chain', name: 'Cold Chain Warehouse', icon: 'ice', branch: 'supply', cost: 1_000, requires: ['bulk_buying'], minPieces: 10_000, desc: '-10% ingredient costs.' },
+  supply_contracts: { id: 'supply_contracts', name: 'Long-term Supplier Contracts', icon: 'handshake', branch: 'supply', cost: 8_000, requires: ['cold_chain'], minPieces: 250_000, desc: '-15% ingredient costs.' },
 
-  training_program: { id: 'training_program', name: 'Training Program', emoji: '🎓', branch: 'staff', cost: 20, requires: [], minPieces: 0, desc: 'Staff training costs 30% less.' },
-  uniforms: { id: 'uniforms', name: 'Smart Uniforms', emoji: '👘', branch: 'staff', cost: 60, requires: ['training_program'], minPieces: 0, desc: '+5% guest satisfaction.' },
-  career_ladder: { id: 'career_ladder', name: 'Career Ladder', emoji: '📈', branch: 'staff', cost: 1_500, requires: ['uniforms'], minPieces: 20_000, desc: 'Staff gain experience 2x faster.' },
-  ops_center: { id: 'ops_center', name: 'Operations Center', emoji: '🗂️', branch: 'staff', cost: 120, requires: ['training_program'], minPieces: 2_000, desc: 'House rules (auto-hire, smart pricing) at every restaurant, no manager needed.' },
-  manager_academy: { id: 'manager_academy', name: 'Manager Academy', emoji: '🏫', branch: 'staff', cost: 4_000, requires: ['career_ladder'], minPieces: 100_000, desc: 'Offline earnings efficiency 50% → 75%, cap 12h.' },
+  training_program: { id: 'training_program', name: 'Training Program', icon: 'cap', branch: 'staff', cost: 20, requires: [], minPieces: 0, desc: 'Staff training costs 30% less.' },
+  uniforms: { id: 'uniforms', name: 'Smart Uniforms', icon: 'robe', branch: 'staff', cost: 60, requires: ['training_program'], minPieces: 0, desc: '+5% guest satisfaction.' },
+  career_ladder: { id: 'career_ladder', name: 'Career Ladder', icon: 'up', branch: 'staff', cost: 1_500, requires: ['uniforms'], minPieces: 20_000, desc: 'Staff gain experience 2x faster.' },
+  ops_center: { id: 'ops_center', name: 'Operations Center', icon: 'clipboard', branch: 'staff', cost: 120, requires: ['training_program'], minPieces: 2_000, desc: 'Every restaurant runs as if managed: auto-hire and auto-pricing, no manager needed.' },
+  manager_academy: { id: 'manager_academy', name: 'Manager Academy', icon: 'briefcase', branch: 'staff', cost: 4_000, requires: ['career_ladder'], minPieces: 100_000, desc: 'Offline earnings efficiency 50% → 75%, cap 12h.' },
 
-  social_media: { id: 'social_media', name: 'Social Media', emoji: '📱', branch: 'marketing', cost: 25, requires: [], minPieces: 0, desc: 'Unlocks Social Media campaigns.' },
-  loyalty_cards: { id: 'loyalty_cards', name: 'Loyalty Stamp Cards', emoji: '🎫', branch: 'marketing', cost: 90, requires: ['social_media'], minPieces: 0, desc: '+10% guests everywhere (regulars come back).' },
-  influencer_network: { id: 'influencer_network', name: 'Influencer Network', emoji: '🌟', branch: 'marketing', cost: 1_200, requires: ['loyalty_cards'], minPieces: 10_000, desc: 'Unlocks Influencer campaigns.' },
-  brand_story: { id: 'brand_story', name: 'Brand Story', emoji: '📖', branch: 'marketing', cost: 3_000, requires: ['influencer_network'], minPieces: 50_000, desc: 'Unlocks Billboards. Brand grows faster.' },
+  social_media: { id: 'social_media', name: 'Social Media', icon: 'phone', branch: 'marketing', cost: 25, requires: [], minPieces: 0, desc: 'Unlocks Social Media campaigns.' },
+  loyalty_cards: { id: 'loyalty_cards', name: 'Loyalty Stamp Cards', icon: 'ticket', branch: 'marketing', cost: 90, requires: ['social_media'], minPieces: 0, desc: '+10% guests everywhere (regulars come back).' },
+  influencer_network: { id: 'influencer_network', name: 'Influencer Network', icon: 'sparkle', branch: 'marketing', cost: 1_200, requires: ['loyalty_cards'], minPieces: 10_000, desc: 'Unlocks Influencer campaigns.' },
+  brand_story: { id: 'brand_story', name: 'Brand Story', icon: 'book', branch: 'marketing', cost: 3_000, requires: ['influencer_network'], minPieces: 50_000, desc: 'Unlocks Billboards. Brand grows faster.' },
 
-  r_shrimp: { id: 'r_shrimp', name: 'Ebi Technique', emoji: '🦐', branch: 'recipes', cost: 15, requires: [], minPieces: 0, desc: 'Unlocks Shrimp Nigiri.', unlockRecipe: 'shrimp_nigiri' },
-  r_california: { id: 'r_california', name: 'California Roll', emoji: '🥑', branch: 'recipes', cost: 35, requires: ['r_shrimp'], minPieces: 0, desc: 'Unlocks California Roll.', unlockRecipe: 'california_roll' },
-  r_spicy: { id: 'r_spicy', name: 'Spicy Mayo Mastery', emoji: '🌶️', branch: 'recipes', cost: 60, requires: ['r_california'], minPieces: 0, desc: 'Unlocks Spicy Tuna Roll.', unlockRecipe: 'spicy_tuna_roll' },
-  r_ikura: { id: 'r_ikura', name: 'Gunkan Wrapping', emoji: '🟠', branch: 'recipes', cost: 120, requires: ['r_spicy'], minPieces: 5_000, desc: 'Unlocks Ikura Gunkan.', unlockRecipe: 'roe_gunkan' },
-  r_eel: { id: 'r_eel', name: 'Unagi Glaze', emoji: '🔥', branch: 'recipes', cost: 150, requires: ['r_shrimp'], minPieces: 5_000, desc: 'Unlocks Eel Nigiri.', unlockRecipe: 'eel_nigiri' },
-  r_dragon: { id: 'r_dragon', name: 'Dragon Roll', emoji: '🐉', branch: 'recipes', cost: 2_000, requires: ['r_eel', 'r_california'], minPieces: 25_000, desc: 'Unlocks Dragon Roll.', unlockRecipe: 'dragon_roll' },
-  r_rainbow: { id: 'r_rainbow', name: 'Rainbow Roll', emoji: '🌈', branch: 'recipes', cost: 2_500, requires: ['r_dragon'], minPieces: 50_000, desc: 'Unlocks Rainbow Roll.', unlockRecipe: 'rainbow_roll' },
-  r_toro: { id: 'r_toro', name: 'Toro Sourcing', emoji: '💎', branch: 'recipes', cost: 4_500, requires: ['r_rainbow'], minPieces: 100_000, desc: 'Unlocks Fatty Tuna Nigiri.', unlockRecipe: 'toro_nigiri' },
-  r_omakase: { id: 'r_omakase', name: 'Omakase Philosophy', emoji: '🎎', branch: 'recipes', cost: 10_000, requires: ['r_toro'], minPieces: 500_000, desc: "Unlocks Chef's Special Platter.", unlockRecipe: 'chefs_special' },
+  r_shrimp: { id: 'r_shrimp', name: 'Ebi Technique', icon: 'shrimp', branch: 'recipes', cost: 15, requires: [], minPieces: 0, desc: 'Unlocks Shrimp Nigiri.', unlockRecipe: 'shrimp_nigiri' },
+  r_california: { id: 'r_california', name: 'California Roll', icon: 'roll', branch: 'recipes', cost: 35, requires: ['r_shrimp'], minPieces: 0, desc: 'Unlocks California Roll.', unlockRecipe: 'california_roll' },
+  r_spicy: { id: 'r_spicy', name: 'Spicy Mayo Mastery', icon: 'fire', branch: 'recipes', cost: 60, requires: ['r_california'], minPieces: 0, desc: 'Unlocks Spicy Tuna Roll.', unlockRecipe: 'spicy_tuna_roll' },
+  r_ikura: { id: 'r_ikura', name: 'Gunkan Wrapping', icon: 'nigiri', branch: 'recipes', cost: 120, requires: ['r_spicy'], minPieces: 5_000, desc: 'Unlocks Ikura Gunkan.', unlockRecipe: 'roe_gunkan' },
+  r_eel: { id: 'r_eel', name: 'Unagi Glaze', icon: 'fish', branch: 'recipes', cost: 150, requires: ['r_shrimp'], minPieces: 5_000, desc: 'Unlocks Eel Nigiri.', unlockRecipe: 'eel_nigiri' },
+  r_dragon: { id: 'r_dragon', name: 'Dragon Roll', icon: 'dragon', branch: 'recipes', cost: 2_000, requires: ['r_eel', 'r_california'], minPieces: 25_000, desc: 'Unlocks Dragon Roll.', unlockRecipe: 'dragon_roll' },
+  r_rainbow: { id: 'r_rainbow', name: 'Rainbow Roll', icon: 'sparkle', branch: 'recipes', cost: 2_500, requires: ['r_dragon'], minPieces: 50_000, desc: 'Unlocks Rainbow Roll.', unlockRecipe: 'rainbow_roll' },
+  r_toro: { id: 'r_toro', name: 'Toro Sourcing', icon: 'gem', branch: 'recipes', cost: 4_500, requires: ['r_rainbow'], minPieces: 100_000, desc: 'Unlocks Fatty Tuna Nigiri.', unlockRecipe: 'toro_nigiri' },
+  r_omakase: { id: 'r_omakase', name: 'Omakase Philosophy', icon: 'chopsticks', branch: 'recipes', cost: 10_000, requires: ['r_toro'], minPieces: 500_000, desc: "Unlocks Chef's Special Platter.", unlockRecipe: 'chefs_special' },
 
-  franchise_manual: { id: 'franchise_manual', name: 'Franchise Playbook', emoji: '📘', branch: 'empire', cost: 15_000, requires: [], minPieces: 1_000_000, desc: 'Franchises cost 15% less.' },
-  regional_offices: { id: 'regional_offices', name: 'Regional Offices', emoji: '🏢', branch: 'empire', cost: 40_000, requires: ['franchise_manual'], minPieces: 2_000_000, desc: '+25% franchise output.' },
-  global_logistics: { id: 'global_logistics', name: 'Global Logistics', emoji: '✈️', branch: 'empire', cost: 125_000, requires: ['regional_offices'], minPieces: 5_000_000, desc: '+25% franchise output. Unlocks international campaigns.' },
-  sushi_ai: { id: 'sushi_ai', name: 'Demand Forecasting AI', emoji: '🧠', branch: 'empire', cost: 400_000, requires: ['global_logistics'], minPieces: 25_000_000, desc: '+30% guests everywhere, franchises included.' },
+  franchise_manual: { id: 'franchise_manual', name: 'Franchise Playbook', icon: 'scroll', branch: 'empire', cost: 15_000, requires: [], minPieces: 1_000_000, desc: 'Franchises cost 15% less.' },
+  regional_offices: { id: 'regional_offices', name: 'Regional Offices', icon: 'office', branch: 'empire', cost: 40_000, requires: ['franchise_manual'], minPieces: 2_000_000, desc: '+25% franchise output.' },
+  global_logistics: { id: 'global_logistics', name: 'Global Logistics', icon: 'plane', branch: 'empire', cost: 125_000, requires: ['regional_offices'], minPieces: 5_000_000, desc: '+25% franchise output. Unlocks international campaigns.' },
+  sushi_ai: { id: 'sushi_ai', name: 'Demand Forecasting AI', icon: 'brain', branch: 'empire', cost: 400_000, requires: ['global_logistics'], minPieces: 25_000_000, desc: '+30% guests everywhere, franchises included.' },
 };
 
 // ---------------------------------------------------------------- milestones
@@ -370,18 +374,18 @@ export function milestone(i: number): Milestone {
 export const FIXED_MILESTONE_COUNT = FIXED_MILESTONES.length;
 
 // ---------------------------------------------------------------- endgame: cities, HQ, facilities
-export interface CityDef { id: string; name: string; flag: string; openCost: number; franchiseBase: number; maxFranchises: number; mult: number; minPieces: number }
+export interface CityDef { id: string; name: string; icon: IconId; openCost: number; franchiseBase: number; maxFranchises: number; mult: number; minPieces: number }
 
 export const CITIES: Record<string, CityDef> = {
-  tokyo: { id: 'tokyo', name: 'Tokyo Suburbs', flag: '🗼', openCost: 0, franchiseBase: 4_000_000, maxFranchises: 40, mult: 1, minPieces: 1_000_000 },
-  osaka: { id: 'osaka', name: 'Osaka', flag: '🏯', openCost: 60_000_000, franchiseBase: 6_000_000, maxFranchises: 30, mult: 1.1, minPieces: 1_500_000 },
-  kyoto: { id: 'kyoto', name: 'Kyoto', flag: '⛩️', openCost: 90_000_000, franchiseBase: 7_000_000, maxFranchises: 20, mult: 1.3, minPieces: 2_000_000 },
-  seoul: { id: 'seoul', name: 'Seoul', flag: '🇰🇷', openCost: 250_000_000, franchiseBase: 15_000_000, maxFranchises: 35, mult: 1.4, minPieces: 5_000_000 },
-  singapore: { id: 'singapore', name: 'Singapore', flag: '🇸🇬', openCost: 500_000_000, franchiseBase: 25_000_000, maxFranchises: 30, mult: 1.6, minPieces: 10_000_000 },
-  nyc: { id: 'nyc', name: 'New York City', flag: '🗽', openCost: 1.5e9, franchiseBase: 60_000_000, maxFranchises: 60, mult: 2.2, minPieces: 25_000_000 },
-  london: { id: 'london', name: 'London', flag: '🇬🇧', openCost: 2.5e9, franchiseBase: 80_000_000, maxFranchises: 50, mult: 2.4, minPieces: 50_000_000 },
-  paris: { id: 'paris', name: 'Paris', flag: '🗼', openCost: 4e9, franchiseBase: 110_000_000, maxFranchises: 50, mult: 2.7, minPieces: 100_000_000 },
-  dubai: { id: 'dubai', name: 'Dubai', flag: '🇦🇪', openCost: 8e9, franchiseBase: 200_000_000, maxFranchises: 40, mult: 3.5, minPieces: 250_000_000 },
+  tokyo: { id: 'tokyo', name: 'Tokyo Suburbs', icon: 'tower', openCost: 0, franchiseBase: 4_000_000, maxFranchises: 40, mult: 1, minPieces: 1_000_000 },
+  osaka: { id: 'osaka', name: 'Osaka', icon: 'castle', openCost: 60_000_000, franchiseBase: 6_000_000, maxFranchises: 30, mult: 1.1, minPieces: 1_500_000 },
+  kyoto: { id: 'kyoto', name: 'Kyoto', icon: 'torii', openCost: 90_000_000, franchiseBase: 7_000_000, maxFranchises: 20, mult: 1.3, minPieces: 2_000_000 },
+  seoul: { id: 'seoul', name: 'Seoul', icon: 'skyline', openCost: 250_000_000, franchiseBase: 15_000_000, maxFranchises: 35, mult: 1.4, minPieces: 5_000_000 },
+  singapore: { id: 'singapore', name: 'Singapore', icon: 'skyline', openCost: 500_000_000, franchiseBase: 25_000_000, maxFranchises: 30, mult: 1.6, minPieces: 10_000_000 },
+  nyc: { id: 'nyc', name: 'New York City', icon: 'skyline', openCost: 1.5e9, franchiseBase: 60_000_000, maxFranchises: 60, mult: 2.2, minPieces: 25_000_000 },
+  london: { id: 'london', name: 'London', icon: 'globe', openCost: 2.5e9, franchiseBase: 80_000_000, maxFranchises: 50, mult: 2.4, minPieces: 50_000_000 },
+  paris: { id: 'paris', name: 'Paris', icon: 'tower', openCost: 4e9, franchiseBase: 110_000_000, maxFranchises: 50, mult: 2.7, minPieces: 100_000_000 },
+  dubai: { id: 'dubai', name: 'Dubai', icon: 'skyline', openCost: 8e9, franchiseBase: 200_000_000, maxFranchises: 40, mult: 3.5, minPieces: 250_000_000 },
 };
 export const CITY_IDS = Object.keys(CITIES);
 
@@ -396,8 +400,8 @@ export function franchiseCost(city: CityDef, owned: number, discount = 1): numbe
 export const HQ_MAX = 10;
 export function hqCost(level: number): number { return Math.round(50_000_000 * Math.pow(2.4, level)); }
 export const FACILITIES = {
-  kitchen: { name: 'Central Kitchen', emoji: '🏭', desc: '+15% cooking speed in every restaurant per level, franchise output +10%.', base: 40_000_000, growth: 2.5, max: 10 },
-  logistics: { name: 'Distribution Center', emoji: '🚛', desc: '-6% ingredient cost per level, +10% franchise output.', base: 30_000_000, growth: 2.5, max: 10 },
+  kitchen: { name: 'Central Kitchen', icon: 'factory', desc: '+15% cooking speed in every restaurant per level, franchise output +10%.', base: 40_000_000, growth: 2.5, max: 10 },
+  logistics: { name: 'Distribution Center', icon: 'truck', desc: '-6% ingredient cost per level, +10% franchise output.', base: 30_000_000, growth: 2.5, max: 10 },
 } as const;
 export type FacilityId = keyof typeof FACILITIES;
 
@@ -409,13 +413,13 @@ export const RIVALS: Record<string, RivalDef> = {
   golden: { id: 'golden', name: 'Golden Chopstick', owner: 'Chef Hayashi', color: '#c9a227', style: 'luxury omakase', districts: ['ginza', 'shinjuku'] },
 };
 
-export interface EventDef { id: string; name: string; emoji: string; desc: string; demand: number; days: number; ingredient?: IngredientId; ingredientMult?: number; rain?: boolean; minPieces: number }
+export interface EventDef { id: string; name: string; icon: IconId; desc: string; demand: number; days: number; ingredient?: IngredientId; ingredientMult?: number; rain?: boolean; minPieces: number }
 export const EVENTS: Record<string, EventDef> = {
-  festival: { id: 'festival', name: 'Tokyo Sushi Festival', emoji: '🎏', desc: 'Sushi fever! +60% demand everywhere.', demand: 1.6, days: 1, minPieces: 500 },
-  tourists: { id: 'tourists', name: 'Tourist Season', emoji: '🧳', desc: 'Tour buses everywhere. +35% demand, more tourists.', demand: 1.35, days: 2, minPieces: 200 },
-  rain: { id: 'rain', name: 'Rainy Day', emoji: '🌧️', desc: 'Fewer walk-ins (-25%) but takeout booms for automated shops.', demand: 0.75, days: 1, rain: true, minPieces: 0 },
-  shortage_salmon: { id: 'shortage_salmon', name: 'Salmon Shortage', emoji: '📉', desc: 'Salmon costs 2.5x today.', demand: 1, days: 1, ingredient: 'salmon', ingredientMult: 2.5, minPieces: 300 },
-  shortage_tuna: { id: 'shortage_tuna', name: 'Tuna Shortage', emoji: '📉', desc: 'Tuna costs 2.5x today.', demand: 1, days: 1, ingredient: 'tuna', ingredientMult: 2.5, minPieces: 1_000 },
-  holiday: { id: 'holiday', name: 'Golden Week Rush', emoji: '🎌', desc: 'Holiday crowds: +80% demand.', demand: 1.8, days: 1, minPieces: 5_000 },
-  critic: { id: 'critic', name: 'Critic in Town', emoji: '📝', desc: 'A famous food critic is visiting restaurants today. Impress them!', demand: 1, days: 1, minPieces: 2_000 },
+  festival: { id: 'festival', name: 'Tokyo Sushi Festival', icon: 'lantern', desc: 'Sushi fever! +60% demand everywhere.', demand: 1.6, days: 1, minPieces: 500 },
+  tourists: { id: 'tourists', name: 'Tourist Season', icon: 'camera', desc: 'Tour buses everywhere. +35% demand, more tourists.', demand: 1.35, days: 2, minPieces: 200 },
+  rain: { id: 'rain', name: 'Rainy Day', icon: 'down', desc: 'Fewer walk-ins (-25%) but takeout booms for automated shops.', demand: 0.75, days: 1, rain: true, minPieces: 0 },
+  shortage_salmon: { id: 'shortage_salmon', name: 'Salmon Shortage', icon: 'down', desc: 'Salmon costs 2.5x today.', demand: 1, days: 1, ingredient: 'salmon', ingredientMult: 2.5, minPieces: 300 },
+  shortage_tuna: { id: 'shortage_tuna', name: 'Tuna Shortage', icon: 'down', desc: 'Tuna costs 2.5x today.', demand: 1, days: 1, ingredient: 'tuna', ingredientMult: 2.5, minPieces: 1_000 },
+  holiday: { id: 'holiday', name: 'Golden Week Rush', icon: 'fireworks', desc: 'Holiday crowds: +80% demand.', demand: 1.8, days: 1, minPieces: 5_000 },
+  critic: { id: 'critic', name: 'Critic in Town', icon: 'note', desc: 'A famous food critic is visiting restaurants today. Impress them!', demand: 1, days: 1, minPieces: 2_000 },
 };

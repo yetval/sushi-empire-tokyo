@@ -11,9 +11,8 @@ export interface BusEvents {
   million: Record<string, never>;
   upgrade: { restaurant: string; upgrade: string; level: number };
   purchase: { what: string };
-  dayEnd: { day: number; revenue: number; expenses: number; pieces: number; customers: number };
-  event: { id: string; name: string; desc: string; emoji: string };
-  customerLeft: { restaurant: string; customerId: number | null; reason: 'patience' | 'nostock' | 'closed' };
+  dayEnd: { day: number; revenue: number; expenses: number; invested: number; pieces: number; customers: number }; // expenses = operating only
+  customerLeft: { restaurant: string; customerId: number | null; reason: 'patience' | 'closed' };
   ticketReady: { restaurant: string; ticketId: number };
   restaurantsChanged: Record<string, never>; // ownership / upgrades / staff changed → rebuild visuals
   offline: { seconds: number; pieces: number; revenue: number; expenses: number };

@@ -4,12 +4,12 @@
 
 const TIPS = [
   'A chef plus a server runs a restaurant on its own, even while you explore.',
-  'Perfect timing in the cooking minigame means bigger tips and better reviews.',
+  'Hire a manager and a restaurant hires its own staff and sets its own prices.',
   'Watch the patience bubbles: guests who wait too long walk out.',
   'Higher prices mean better margins, but fewer guests. Ginza diners pay far more.',
   'Managers keep a restaurant earning while the tab is closed.',
-  'Out of fish? Visit Mika’s Fresh Fish, or research Scheduled Deliveries.',
-  'A dirty restaurant loses guests. Hire a cleaner or tidy up yourself.',
+  'An amber seal means a restaurant needs attention: usually one more chef or server.',
+  'Press E at any restaurant you own to open its books, staff and upgrades.',
   'One million pieces is not the end. Chapter 2 opens franchises around the world.',
   'Finish all three daily requests to build a streak bonus.',
   'Each district has its own crowd: students in Shibuya, salarymen in Shinjuku.',

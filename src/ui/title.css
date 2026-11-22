@@ -1,0 +1,106 @@
+/* Title screen and new-game panel. A poster lockup over the live 3D street: warm lacquer vignette on the left,
+   outlined Dela wordmark with a stamped hanko, chunky menu; side panels pop in on the right over a soft scrim. */
+.btn .ja { font: 700 12px var(--body); letter-spacing: .12em; margin-left: 10px; }
+.modal-head h2 .ja { font: 700 13px var(--body); letter-spacing: .3em; opacity: .7; margin-left: 6px; }
+
+/* ---------------------------------------------------------------- frame */
+.title {
+  position: absolute; inset: 0; display: grid; grid-template-columns: minmax(460px, 44%) 1fr; transition: opacity .5s;
+  background:
+    radial-gradient(115% 100% at 0% 48%, rgba(22, 18, 16, .88) 0%, rgba(22, 18, 16, .7) 38%, rgba(22, 18, 16, 0) 70%),
+    linear-gradient(0deg, rgba(22, 18, 16, .45), rgba(22, 18, 16, 0) 22%);
+}
+.title.out { opacity: 0; pointer-events: none; }
+.title-left { position: relative; padding: var(--s6) var(--s5) var(--s6) clamp(40px, 6vw, 96px); display: flex; flex-direction: column; justify-content: center; gap: var(--s5); color: var(--washi); }
+
+/* ---------------------------------------------------------------- lockup */
+.lockup { --fs: clamp(64px, 7.2vw, 108px); position: relative; display: flex; align-items: flex-start; gap: var(--s4); width: max-content; }
+.lk-jp {
+  writing-mode: vertical-rl; font: 400 clamp(22px, 2.1vw, 30px)/1 var(--display); letter-spacing: .22em; color: var(--c-money);
+  margin-top: .2em; padding: var(--s1) var(--s3) var(--s1) 0; border-right: 3px solid var(--c-money);
+  text-shadow: 0 2px 0 var(--lacquer);
+}
+h1.logo { margin: 0; }
+.logo { font: 400 var(--fs)/.92 var(--display); letter-spacing: .01em; }
+.logo :is(.l1, .l2) {
+  display: block; width: max-content; color: #fffaf0; -webkit-text-stroke: .1em var(--ink); paint-order: stroke fill;
+  text-shadow: 0 .035em 0 var(--ink), 0 .07em 0 var(--ink), 0 .105em 0 var(--ink), 0 .2em .22em rgba(0, 0, 0, .45);
+}
+.logo .l2 { color: #ffd257; margin-top: .04em; }
+.logo .jp { display: flex; align-items: center; gap: var(--s3); margin-top: var(--s4); font: 400 22px/1 var(--display); }
+.logo .jp::before, .logo .jp::after { content: ''; flex: 1 1 24px; max-width: 64px; height: 3px; border-radius: 2px; background: var(--c-money); }
+.logo .jp::after { flex-grow: 3; max-width: none; }
+.logo .jp b { font-weight: 400; color: var(--washi); letter-spacing: .5em; margin-right: -.5em; }
+.logo .jp i { font: 900 18px/1 var(--body); font-style: normal; color: var(--c-money); letter-spacing: .2em; }
+.logo .l1 { position: relative; }
+/* anchored to the end of SUSHI, filling the gap above EMPIRE's "RE" */
+.lk-seal { position: absolute; z-index: 1; left: calc(100% + .1em); top: -.08em; width: .86em; height: .86em; transform: rotate(-9deg); filter: drop-shadow(0 4px 0 rgba(22, 18, 16, .6)) drop-shadow(0 10px 14px rgba(0, 0, 0, .35)); }
+.lk-seal > svg { width: 100%; height: 100%; }
+.tagline { margin: 0; font: 700 17px/1.4 var(--body); color: #efe3cb; letter-spacing: .02em; text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }
+
+/* ---------------------------------------------------------------- menu */
+.title-menu { display: flex; flex-direction: column; gap: var(--s4); width: min(380px, 100%); padding-bottom: 6px; }
+.title-menu > .btn.big { justify-content: flex-start; min-height: 76px; padding: var(--s2) var(--s5) var(--s3) var(--s3); gap: var(--s4); text-align: left; }
+.title-menu > .btn.big > .ico { width: 40px; height: 40px; transform: rotate(-5deg); }
+.tb-l { display: flex; flex-direction: column; gap: var(--s1); font-size: 26px; }
+.tb-l .ja { margin: 0; font: 900 13px/1 var(--body); letter-spacing: .22em; text-shadow: none; }
+.title-sub { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+.title-sub .btn { width: 100%; }
+.title-sub .btn .ja { margin-left: 0; font-size: 12px; letter-spacing: .08em; color: var(--ink-2); }
+.title-foot { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3); max-width: 520px; font: 700 13px var(--body); color: #e6d8bf; }
+.title-foot > span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+/* ---------------------------------------------------------------- side panel (name / settings / credits / confirm) */
+.title-right { display: grid; place-items: center; min-height: 0; padding: var(--s5); transition: background .3s; }
+.title:has(.title-panel:not(:empty)) .title-right { background: radial-gradient(closest-side, rgba(22, 18, 16, .55), rgba(22, 18, 16, 0)); }
+.title-panel { width: min(540px, 100%); }
+.title-panel > .panel { display: flex; flex-direction: column; max-height: calc(100vh - 2 * var(--s5)); background: var(--paper); animation: pop-in .42s var(--ease-out) both; overflow: hidden; }
+.title-panel > .panel > .seal-h:first-child { min-height: 60px; padding: var(--s3) var(--s5) var(--s3) var(--s4); gap: var(--s3); }
+.title-panel > .panel > .seal-h:first-child > h2 { font-size: 23px; }
+.title-panel .seal-h h2 .ja { font: 900 13px var(--body); letter-spacing: .25em; opacity: .85; margin-left: var(--s1); text-shadow: none; }
+.tp-body { display: flex; flex-direction: column; gap: var(--s3); min-height: 0; overflow-y: auto; padding: var(--s4) var(--s5) var(--s5); }
+.tp-body > p { margin: 0; }
+.tp-lede { font: 700 15px/1.45 var(--body); color: var(--ink-2); text-wrap: pretty; }
+.tp-actions { display: flex; justify-content: flex-end; align-items: center; gap: var(--s3); margin-top: var(--s2); padding-bottom: 6px; }
+
+.nc-form { display: flex; flex-direction: column; gap: var(--s4); margin: 0; }
+.nc-sign { /* live kanban preview of the shop sign */
+  display: flex; flex-direction: column; align-items: center; gap: var(--s1); padding: var(--s3) var(--s4) var(--s4);
+  background: var(--woodbg); border: var(--bw) solid var(--ink); border-radius: var(--r-md);
+  box-shadow: inset 0 2px 0 rgba(255, 220, 170, .25), inset 0 -4px 0 var(--wood2), var(--sh-1);
+}
+.nc-co-t { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 26px/1.15 var(--display); color: #fffaf0; -webkit-text-stroke: .1em var(--ink); paint-order: stroke fill; text-shadow: 0 .08em 0 var(--ink); }
+.nc-own { font: 900 13px var(--body); letter-spacing: .08em; color: #ffd257; text-shadow: 0 1px 0 var(--wood2); }
+.nc-sign.dflt .nc-co-t { opacity: .6; }
+.nc-f { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: var(--s1) var(--s2); }
+.nc-f > label { font: 900 15px var(--body); color: var(--ink); }
+.nc-n { font: 700 13px var(--body); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.nc-n.full { color: var(--kin2); }
+.nc-f > input[type=text] {
+  grid-column: 1 / -1; width: 100%; min-height: 52px; padding: 0 var(--s4); font: 700 17px var(--body);
+  border: var(--bw) solid var(--ink); border-radius: var(--r-md); box-shadow: inset 0 4px 0 rgba(31, 27, 23, .08);
+}
+.nc-f > input[type=text]::placeholder { color: var(--ink-2); opacity: 1; }
+.nc-f > input[type=text]:focus { border-color: var(--kin2); box-shadow: inset 0 4px 0 rgba(31, 27, 23, .06), 0 0 0 4px rgba(201, 154, 60, .45); }
+.nc-f > input[aria-invalid=true] { border-color: var(--c-danger); background: var(--c-danger-soft); }
+.nc-hint { margin: 0; font: 700 13px/1.4 var(--body); color: var(--ink-2); }
+.nc-hint.bad { color: var(--c-danger-ink); }
+.tp-body .grid.g2 { gap: var(--s3) var(--s4); }
+
+/* ---------------------------------------------------------------- entrance */
+@keyframes title-rise { from { opacity: 0; transform: translateY(20px); } }
+@keyframes title-stamp { 0% { opacity: 0; transform: scale(2.4) rotate(-28deg); } 55% { opacity: 1; transform: scale(.88) rotate(-6deg); } 75% { transform: scale(1.05) rotate(-10deg); } }
+/* fill-mode backwards (not both) so hover/press transforms still work once the entrance ends */
+.logo .l1 { animation: title-rise .5s var(--ease-out) .05s backwards; }
+.logo .l2 { animation: title-rise .5s var(--ease-out) .14s backwards; }
+.lk-jp, .logo .jp { animation: title-rise .5s var(--ease-out) .26s backwards; }
+.lk-seal { animation: title-stamp .5s var(--ease-out) .5s backwards; }
+.tagline { animation: title-rise .5s var(--ease-out) .6s backwards; }
+.title-menu > * { animation: pop-in .45s var(--ease-out) backwards; }
+.title-menu > :nth-child(1) { animation-delay: .7s; }
+.title-menu > :nth-child(2) { animation-delay: .78s; }
+.title-menu > :nth-child(3) { animation-delay: .86s; }
+.title-foot { animation: title-rise .5s var(--ease-out) .95s backwards; }
+@media (prefers-reduced-motion: reduce) {
+  .title *, .title-panel > .panel { animation: none !important; }
+}

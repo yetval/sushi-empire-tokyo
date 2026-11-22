@@ -1,14 +1,13 @@
 // Game state shape, creation, persistence (LocalStorage), migration, import/export.
 import type { QuestState } from './quests';
 import type { Review } from './reviews';
-import { createContractState, sanitizeContracts, type ContractState } from './contracts';
 import {
-  CAMPAIGNS, CITIES, CUSTOMERS, CustomerType, DISTRICTS, DistrictId, EVENTS, INGREDIENT_IDS, IngredientId,
-  PROPERTIES, RECIPES, RIVALS, ROLES, Role, START_MINUTE, START_RECIPES, wageFor,
+  CAMPAIGNS, CITIES, CUSTOMERS, CustomerType, DISTRICTS, DistrictId, INGREDIENT_IDS, IngredientId,
+  PROPERTIES, RECIPES, RESEARCH, ROLES, Role, START_MINUTE, START_RECIPES, UPGRADES, wageFor,
   AREAS, CONCEPTS, ConceptId,
 } from './data';
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2; // 2: tycoon pivot (no manual cooking, cleaners → servers)
 export const SAVE_KEY = 'sushi-empire-tokyo-save';
 
 export interface Avatar {
@@ -23,9 +22,7 @@ export interface Ticket {
   customerId: number | null; // visible NPC id; null = takeout / off-screen order
   customerType: CustomerType;
   progress: number; // pieces cooked (fractional while kitchen works)
-  started: boolean; // ingredients consumed
-  cook: 'kitchen' | 'player'; // who is responsible for cooking
-  manualOnly?: boolean; // VIP special request: only the player can cook it
+  started: boolean; // a chef has started on it
   quality: number; // 0..1, set when finished
   createdAt: number; // state.clock seconds
 }
@@ -36,7 +33,7 @@ export interface RestaurantState {
   priceMult: number; // 0.6..2.0
   menu: string[];
   reputation: number; // 0..5 stars
-  cleanliness: number; // 0..1
+  cleanliness: number; // unused since v2 (always clean); kept for save compatibility
   signColor: string; theme: number; uniform: string;
   orders: Ticket[]; // accepted, not ready
   ready: Ticket[]; // cooked, waiting to be served
@@ -61,7 +58,8 @@ export interface Employee {
   restaurant: string | null; look: Avatar;
 }
 
-export interface DaySummary { day: number; revenue: number; expenses: number; pieces: number; customers: number; avgStars?: number }
+/** expenses = operating costs (ingredients, wages, rent); invested = one-off purchases (sim.spend). Older saves lack invested. */
+export interface DaySummary { day: number; revenue: number; expenses: number; invested?: number; pieces: number; customers: number; avgStars?: number }
 
 export interface Settings {
   master: number; music: number; sfx: number; muted: boolean;
@@ -77,12 +75,12 @@ export interface GameState {
   cash: number;
   lifetime: { pieces: number; revenue: number; expenses: number; customers: number; tips: number; manualOrders: number; bestOrder: number; lost: number; perfectCooks: number; criticsWowed: number; fastestServe: number };
   quests: QuestState;
-  contracts: ContractState;
+  contracts: Record<string, unknown>; // unused since v2; kept for save compatibility
   reviews: Record<string, Review[]>;
   piecesByRecipe: Record<string, number>;
   player: { name: string; company: string; district: DistrictId; x: number; z: number; yaw: number; avatar: Avatar; title: string | null };
-  inventory: Record<IngredientId, number>;
-  restock: Record<IngredientId, number>; // auto-restock targets
+  inventory: Record<IngredientId, number>; // unused since v2 (ingredients are paid at sale); kept for save compatibility
+  restock: Record<IngredientId, number>; // unused since v2
   restaurants: Record<string, RestaurantState>;
   staff: Employee[]; candidates: Employee[]; nextId: number;
   nextTicketId: number;
@@ -94,16 +92,19 @@ export interface GameState {
   districts: string[]; // unlocked areas (walkable districts + management-only areas)
   flags: Record<string, boolean>;
   tutorial: number; // step index; 99 = done
-  rivals: Record<string, Partial<Record<DistrictId, number>>>; // rival market share 0..0.6
-  event: { id: string; endsDay: number } | null;
+  rivals: Record<string, Partial<Record<DistrictId, number>>>; // unused since v2
+  event: { id: string; endsDay: number } | null; // unused since v2
   hq: number; facilities: { kitchen: number; logistics: number };
   cities: Record<string, { open: boolean; franchises: number }>;
   franchiseFrac: number;
-  history: DaySummary[]; today: DaySummary;
+  history: DaySummary[]; today: DaySummary & { invested: number };
   settings: Settings;
 }
 
-export const DEFAULT_AVATAR: Avatar = { skin: '#f1c27d', hair: '#2b1d14', hairStyle: 0, shirt: '#ffffff', pants: '#2d3142', headwear: 2 };
+/** Hire the priciest starting chef (skill 3: ¥4,800) and still cover about a day of their wage. */
+export const START_CASH = 7_000;
+
+export const DEFAULT_AVATAR: Avatar = { skin: '#e8b98f', hair: '#2b1d14', hairStyle: 8, shirt: '#f2efe8', pants: '#33363f', headwear: 0 };
 
 export function newRestaurant(id: string, day: number, brand = 0, concept?: ConceptId): RestaurantState {
   const p = PROPERTIES[id];
@@ -119,14 +120,13 @@ export function newRestaurant(id: string, day: number, brand = 0, concept?: Conc
 
 export function createNewState(name = 'Chef', company = 'Sushi Empire'): GameState {
   const inv = Object.fromEntries(INGREDIENT_IDS.map((i) => [i, 0])) as Record<IngredientId, number>;
-  inv.rice = 30; inv.nori = 15; inv.cucumber = 15; inv.salmon = 15;
   const restock = Object.fromEntries(INGREDIENT_IDS.map((i) => [i, 0])) as Record<IngredientId, number>;
   const now = Date.now();
   return {
     version: SAVE_VERSION, createdAt: now, lastSaved: now, clock: 0, playTime: 0,
-    day: 1, minute: START_MINUTE, cash: 12_000, // enough to hire a first crew right after the tutorial
+    day: 1, minute: START_MINUTE, cash: START_CASH,
     lifetime: { pieces: 0, revenue: 0, expenses: 0, customers: 0, tips: 0, manualOrders: 0, bestOrder: 0, lost: 0, perfectCooks: 0, criticsWowed: 0, fastestServe: 0 },
-    quests: { day: 0, list: [], streak: 0 }, reviews: {}, contracts: createContractState(),
+    quests: { day: 0, list: [], streak: 0 }, reviews: {}, contracts: {},
     piecesByRecipe: {},
     player: { name, company, district: 'asakusa', x: 0, z: 14, yaw: Math.PI, avatar: { ...DEFAULT_AVATAR }, title: null },
     inventory: inv, restock,
@@ -134,10 +134,10 @@ export function createNewState(name = 'Chef', company = 'Sushi Empire'): GameSta
     staff: [], candidates: [], nextId: 1, nextTicketId: 1,
     campaigns: [], brand: 0, rp: 0, research: [], recipes: [...START_RECIPES],
     milestoneIndex: 0, districts: ['asakusa'], flags: {}, tutorial: 0,
-    rivals: { kaiten: { asakusa: 0.1, shibuya: 0.2, shinjuku: 0.15 }, maguro: { shibuya: 0.15, shinjuku: 0.15 }, golden: { ginza: 0.25, shinjuku: 0.05 } },
+    rivals: {},
     event: null, hq: 0, facilities: { kitchen: 0, logistics: 0 },
     cities: {}, franchiseFrac: 0,
-    history: [], today: { day: 1, revenue: 0, expenses: 0, pieces: 0, customers: 0 },
+    history: [], today: { day: 1, revenue: 0, expenses: 0, invested: 0, pieces: 0, customers: 0 },
     settings: { master: 0.8, music: 0.5, sfx: 0.8, muted: false, sensitivity: 1, invertY: false, quality: 'high' },
   };
 }
@@ -147,14 +147,15 @@ export function createNewState(name = 'Chef', company = 'Sushi Empire'): GameSta
 /** Upgrade older saves, filling missing fields while retaining progress. */
 export function migrate(raw: unknown): GameState {
   if (!isRecord(raw) || typeof raw.cash !== 'number') throw new Error('Not a valid save');
-  const { rivals, ...fresh } = createNewState();
+  const fresh = createNewState();
   deepFill(raw, fresh);
-  // A missing market share means the player bought out that rival in that district.
-  raw.rivals ??= rivals;
-  if (!isRecord(raw.rivals)) throw new Error('Invalid rival markets');
-  for (const [id, shares] of Object.entries(rivals)) raw.rivals[id] ??= shares;
   const s = raw as unknown as GameState;
-  // version-specific migrations go here: if (s.version < 2) { ... }
+  if (s.version < 2) {
+    // tycoon pivot: the Cleaner role is gone (servers keep their skill); the tutorial restarts at "hire a chef"
+    // and advances itself from what the save already has
+    for (const e of [...s.staff, ...s.candidates]) if (isRecord(e) && (e.role as string) === 'cleaner') { e.role = 'server'; e.wage = wageFor('server', e.skill); }
+    if (s.tutorial > 0 && s.tutorial < 99) s.tutorial = 1;
+  }
   if (!knownId(s.player.district, DISTRICTS) || s.districts.some((d) => !knownId(d, AREAS))) {
     throw new Error('Invalid district');
   }
@@ -172,6 +173,7 @@ export function migrate(raw: unknown): GameState {
     r.hist = (Array.isArray(r.hist) ? r.hist : []).map(day).filter((d): d is NonNullable<typeof d> => d !== null).slice(-14);
     r.day = day(r.day) ?? emptyDay(s.day);
     if (!Array.isArray(r.log)) r.log = [];
+    for (const u of Object.keys(r.upgrades)) if (!knownId(u, UPGRADES)) delete r.upgrades[u]; // retired upgrades (e.g. cleaning)
     if (r.id !== id || r.menu.some((recipe) => !knownId(recipe, RECIPES))) throw new Error('Invalid restaurant menu');
     if (!(r.takeoutFrac >= 0 && r.takeoutFrac < 1)) throw new Error('Invalid takeout counter');
     for (const ticket of [...r.orders, ...r.ready]) {
@@ -188,10 +190,10 @@ export function migrate(raw: unknown): GameState {
   }
   // Older releases reused IDs after reload. Live NPC references are rebuilt on load.
   for (const ticket of ticketsToRenumber) ticket.id = s.nextTicketId++;
+  s.research = s.research.filter((id) => knownId(id, RESEARCH)); // retired research (e.g. auto_restock)
   if (s.recipes.some((recipe) => !knownId(recipe, RECIPES)) || Object.keys(s.piecesByRecipe).some((recipe) => !knownId(recipe, RECIPES))) {
     throw new Error('Invalid recipe');
   }
-  sanitizeContracts(s);
   if (!isRecord(s.quests) || !Array.isArray(s.quests.list)) s.quests = { day: 0, list: [], streak: 0 };
   s.quests.list = s.quests.list.filter((x) => isRecord(x) && typeof x.id === 'string' && Number.isFinite(x.target) && Number.isFinite(x.progress));
   if (!isRecord(s.reviews)) s.reviews = {};
@@ -208,14 +210,7 @@ export function migrate(raw: unknown): GameState {
     if (!knownId(id, CITIES) || !isRecord(c)) { delete s.cities[id]; continue; }
     c.franchises = Number.isFinite(c.franchises) ? Math.max(0, Math.min(CITIES[id].maxFranchises, Math.floor(c.franchises))) : 0;
   }
-  if (s.campaigns.some((campaign) => !isRecord(campaign) || !knownId(campaign.id, CAMPAIGNS)) ||
-      (s.event !== null && (!isRecord(s.event) || !knownId(s.event.id, EVENTS)))) {
-    throw new Error('Invalid event or campaign');
-  }
-  if (Object.entries(s.cities).some(([id, city]) => !knownId(id, CITIES) || !isRecord(city)) ||
-      Object.entries(s.rivals).some(([id, shares]) => !knownId(id, RIVALS) || !isRecord(shares))) {
-    throw new Error('Invalid empire markets');
-  }
+  if (s.campaigns.some((campaign) => !isRecord(campaign) || !knownId(campaign.id, CAMPAIGNS))) throw new Error('Invalid campaign');
   if (!Number.isFinite(s.cash)) s.cash = 0;
   if (!Number.isFinite(s.lastSaved)) s.lastSaved = fresh.lastSaved;
   if (!Number.isFinite(s.lifetime.pieces) || s.lifetime.pieces < 0) s.lifetime.pieces = 0;

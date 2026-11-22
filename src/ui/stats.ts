@@ -1,26 +1,13 @@
-// Statistics panel: canvas charts of the last 30 days + lifetime tiles. Self-contained; mounted by the management UI.
+// Statistics panel: canvas charts of the last 30 days + lifetime ledger. Mounted by the management UI; styles live in progress.css.
 import { PROPERTIES, RECIPES } from '../core/data';
 import { duration, exact, short, yen, yenExact } from '../core/format';
 import type { DaySummary, GameState } from '../core/state';
-import { bar, el, esc, stars } from './dom';
+import { el, esc, stars } from './dom';
+import { icon } from './icons';
 
-// Canvas can't read CSS vars cheaply; these mirror :root in styles.css.
-const C = { sumi: '#1f1b17', sumi2: '#5b5047', sumi3: '#8b7d6f', shu: '#c8322a', ai: '#23385c', kin: '#c99a3c', matcha: '#4f7a35', paper: '#fffdf7' };
-const FONT = '700 12px "Zen Maru Gothic", system-ui, sans-serif';
-
-const CSS = `
-.stats-chart { position: relative; height: 190px; background: ${C.paper}; border: 1.5px solid var(--sumi); border-radius: 3px; }
-.stats-chart canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.stats-legend { display: inline-flex; gap: 10px; font: 700 12px var(--body); color: var(--sumi2); }
-.stats-legend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; border-radius: 2px; }
-.stats-legend i.ln { height: 3px; vertical-align: 2px; }
-.stats-rec { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; font-size: 13px; font-weight: 700; }
-.stats-rec .bar { grid-column: 1 / -1; height: 7px; margin-bottom: 6px; }
-table.stats-tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
-table.stats-tbl th { text-align: right; font-size: 12px; font-weight: 800; color: var(--sumi2); letter-spacing: .06em; padding: 4px; border-bottom: 1.5px solid var(--sumi); }
-table.stats-tbl td { text-align: right; padding: 6px 4px; border-bottom: 1px dotted var(--sumi3); font-weight: 800; font-variant-numeric: tabular-nums; }
-table.stats-tbl th:first-child, table.stats-tbl td:first-child { text-align: left; font-weight: 700; overflow-wrap: anywhere; }
-`;
+// Canvas can't read CSS vars cheaply; these mirror the warm :root tokens in base.css.
+const C = { sumi: '#1f1b17', sumi2: '#5b5047', shu: '#b82d25', wood: '#7b4d2c', kin: '#d9a83f', matcha: '#4d7d33', paper: '#fcf7ec' };
+const FONT = '800 12px "Zen Maru Gothic", system-ui, sans-serif';
 
 type Series = { label: string; color: string; vals: number[]; kind: 'bar' | 'line' };
 
@@ -43,38 +30,46 @@ function chart(days: DaySummary[], series: Series[], aria: string, fmt: (n: numb
     const raw = (Math.max(1, ...all) - Math.min(0, ...all)) / 4, mag = 10 ** Math.floor(Math.log10(raw));
     const tick = mag * ([1, 2, 5, 10].find((m) => m * mag >= raw) ?? 10);
     const hi = Math.ceil(Math.max(1, ...all) / tick) * tick, lo = Math.floor(Math.min(0, ...all) / tick) * tick;
-    const L = 52, R = 10, T = 12, B = 22, pw = w - L - R, ph = h - T - B;
+    const L = 64, R = 14, T = 14, B = 26, pw = w - L - R, ph = h - T - B;
     const y = (v: number) => T + ph * (1 - (v - lo) / (hi - lo));
     const step = pw / days.length;
     const x = (i: number) => L + step * (i + 0.5);
     g.font = FONT; g.textBaseline = 'middle';
-    // grid + y labels
+    // grid + y labels (outside the plot, left of L)
     for (let v = lo; v <= hi + tick / 2; v += tick) {
       const yy = Math.round(y(v)) + 0.5;
-      g.strokeStyle = 'rgba(31,27,23,.1)'; g.lineWidth = 1;
+      g.strokeStyle = 'rgba(31,27,23,.12)'; g.lineWidth = 1;
       g.beginPath(); g.moveTo(L, yy); g.lineTo(w - R, yy); g.stroke();
-      g.fillStyle = C.sumi2; g.textAlign = 'right'; g.fillText(fmt(v), L - 6, yy);
+      g.fillStyle = C.sumi2; g.textAlign = 'right'; g.fillText(fmt(v), L - 8, yy);
     }
-    if (lo < 0) { g.strokeStyle = C.sumi; g.beginPath(); g.moveTo(L, Math.round(y(0)) + 0.5); g.lineTo(w - R, Math.round(y(0)) + 0.5); g.stroke(); }
+    g.strokeStyle = C.sumi; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(L, Math.round(y(0)) + 0.5); g.lineTo(w - R, Math.round(y(0)) + 0.5); g.stroke();
     // x labels (thinned so they never overlap)
     g.textAlign = 'center'; g.fillStyle = C.sumi;
-    const every = Math.ceil(28 / step);
+    const every = Math.ceil(30 / step);
     days.forEach((d, i) => { if ((days.length - 1 - i) % every === 0) g.fillText(`D${d.day}`, x(i), h - B / 2); });
-    // bars
+    // bars: chunky, ink-outlined
     const bars = series.filter((s) => s.kind === 'bar');
-    const bw = Math.min(14, (step * 0.7) / Math.max(1, bars.length));
+    const bw = Math.max(3, Math.min(days.length < 7 ? 40 : 22, (step * 0.72) / Math.max(1, bars.length)));
+    g.lineWidth = 1.5; g.strokeStyle = C.sumi;
     bars.forEach((s, j) => {
       g.fillStyle = s.color;
       s.vals.forEach((v, i) => {
         const bx = x(i) - (bw * bars.length) / 2 + j * bw, y0 = y(0), y1 = y(v);
-        g.fillRect(bx, Math.min(y0, y1), bw - 1, Math.abs(y1 - y0));
+        const top = Math.min(y0, y1), hh = Math.abs(y1 - y0);
+        g.fillRect(bx, top, bw - 1, hh);
+        if (hh > 2 && bw > 5) g.strokeRect(bx + 0.75, top + 0.75, bw - 2.5, hh - 1.5);
+        // short histories have room to print each value, which keeps tiny bars readable
+        if (days.length < 7) { g.fillStyle = C.sumi; g.textAlign = 'center'; g.fillText(fmt(v), bx + bw / 2, v >= 0 ? top - 9 : top + hh + 9); g.fillStyle = s.color; }
       });
     });
-    // lines
+    // lines: ink casing under a coloured stroke, dot per day
     for (const s of series.filter((s) => s.kind === 'line')) {
-      g.strokeStyle = g.fillStyle = s.color; g.lineWidth = 2.5; g.lineJoin = 'round';
-      g.beginPath(); s.vals.forEach((v, i) => (i ? g.lineTo(x(i), y(v)) : g.moveTo(x(i), y(v)))); g.stroke();
-      s.vals.forEach((v, i) => { g.beginPath(); g.arc(x(i), y(v), 2.8, 0, Math.PI * 2); g.fill(); });
+      g.lineJoin = 'round'; g.lineCap = 'round';
+      const path = () => { g.beginPath(); s.vals.forEach((v, i) => (i ? g.lineTo(x(i), y(v)) : g.moveTo(x(i), y(v)))); };
+      g.strokeStyle = C.sumi; g.lineWidth = 6; path(); g.stroke();
+      g.strokeStyle = s.color; g.lineWidth = 3; path(); g.stroke();
+      s.vals.forEach((v, i) => { g.beginPath(); g.arc(x(i), y(v), 4, 0, Math.PI * 2); g.fillStyle = s.color; g.fill(); g.lineWidth = 2; g.strokeStyle = C.sumi; g.stroke(); });
     }
   };
   new ResizeObserver(draw).observe(wrap);
@@ -86,48 +81,47 @@ const legend = (series: Series[]) => `<span class="stats-legend">${series.map((s
 
 const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);
 
-/** Exact lifetime totals; re-patched on the management window's tick. */
+/** Lifetime totals (short, with the exact figure on hover); re-patched on the management window's tick. */
 export function ledgerHtml(s: GameState): string {
-  const L = s.lifetime, profitAll = L.revenue - L.expenses;
+  const L = s.lifetime, net = L.revenue - L.expenses;
   const fav = Object.entries(s.piecesByRecipe).filter(([id]) => RECIPES[id]).sort((a, b) => b[1] - a[1])[0];
   const value = Object.keys(s.restaurants).reduce((a, id) => a + PROPERTIES[id].price, 0) + s.cash;
-  const row = (k: string, v: string, cls = '') => `<div class="ln"><span>${k}</span><b class="${cls}">${v}</b></div>`;
-  return `${row('Sushi pieces sold', exact(L.pieces))}${row('Total revenue', yenExact(L.revenue))}${row('Total expenses', yenExact(L.expenses))}
-    ${row('Total profit', yenExact(profitAll), profitAll > 0 ? 'good' : profitAll < 0 ? 'bad' : '')}${row('Customers served', exact(L.customers))}${row('Customers lost', exact(L.lost), L.lost ? 'bad' : '')}
-    ${row('Tips received', yenExact(L.tips))}${row('Largest single order', yenExact(L.bestOrder))}${row('Orders cooked by hand', exact(L.manualOrders))}
-    ${row('Favorite recipe', fav ? `${esc(RECIPES[fav[0]].name)} (${exact(fav[1])})` : '—')}${row('Restaurants', String(Object.keys(s.restaurants).length))}
+  const row = (k: string, v: string, cls = '', title = '') => `<div class="ln"><span>${k}</span><b class="${cls}"${title ? ` title="${title}"` : ''}>${v}</b></div>`;
+  const money = (k: string, n: number, cls = '') => row(k, yen(n), cls, yenExact(n));
+  const tone = (n: number) => (n > 0 ? 'good' : n < 0 ? 'bad' : '');
+  return `${row('Sushi pieces sold', exact(L.pieces))}${money('Total revenue', L.revenue, 'good')}
+    ${money('Total spent (running + investments)', L.expenses, 'bad')}${money('Net result', net, tone(net))}
+    ${row('Customers served', exact(L.customers))}${row('Customers lost', exact(L.lost), L.lost ? 'bad' : '')}
+    ${money('Tips received', L.tips)}${money('Largest single order', L.bestOrder)}
+    ${row('Favorite recipe', fav ? `${esc(RECIPES[fav[0]].name)} (${exact(fav[1])})` : '—', 'txt')}${row('Restaurants', String(Object.keys(s.restaurants).length))}
     ${row('Franchises', String(Object.values(s.cities).reduce((a, c) => a + c.franchises, 0)))}${row('Employees', String(s.staff.length))}
-    ${row('Business value (property + cash)', yenExact(value))}${row('Days in business', String(s.day))}${row('Play time', duration(s.playTime))}`;
+    ${money('Business value (property + cash)', value)}${row('Days in business', String(s.day))}${row('Play time', duration(s.playTime), 'txt')}`;
 }
 
 export function statsPanel(s: GameState): HTMLElement {
-  if (!document.getElementById('stats-css')) {
-    const st = el('style'); st.id = 'stats-css'; st.textContent = CSS; document.head.append(st);
-  }
   const h = s.history.slice(-30);
   const root = el('div', 'stats-panel');
 
-  // ---- lifetime tiles
   const topRec = Object.entries(s.piecesByRecipe).filter(([id, n]) => RECIPES[id] && n > 0).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const recMax = topRec[0]?.[1] ?? 1;
   const rests = Object.values(s.restaurants).sort((a, b) => b.revenue - a.revenue);
-  root.innerHTML = `<h2>Statistics 統計</h2>
+  root.innerHTML = `<div class="pg-head">${icon('chart', 36, { variant: 'seal' })}<h2>Statistics <span class="ja">統計</span></h2></div>
     <div class="ledger">${ledgerHtml(s)}</div>
-    <div class="section" data-charts></div>
+    <div data-charts></div>
     <div class="grid g2 section">
-      <div class="card"><h3>Top recipes</h3>${topRec.length ? `<div class="stats-rec">${topRec.map(([id, n]) =>
-        `<span>${esc(RECIPES[id].name)}</span><span class="small">${exact(n)}</span>${bar(n / recMax, 'gold')}`).join('')}</div>`
+      <div class="card"><div class="seal-h">${icon('nigiri', 28, { variant: 'seal' })}<h3>Top recipes</h3></div>${topRec.length ? `<div class="stats-rec">${topRec.map(([id, n]) =>
+        `<span>${esc(RECIPES[id].name)}</span><span class="n">${exact(n)}</span><div class="meter sm p-money"><i style="width:${(n / recMax) * 100}%"></i></div>`).join('')}</div>`
         : '<div class="muted small">Nothing sold yet.</div>'}</div>
-      <div class="card"><h3>Restaurants</h3><table class="stats-tbl"><tr><th>Location</th><th>Served</th><th>Revenue</th><th>Rating</th></tr>
-        ${rests.map((r) => `<tr><td>${esc(r.name)}</td><td>${exact(r.served)}</td><td>${yenExact(r.revenue)}</td><td title="${r.reputation.toFixed(1)} stars">${stars(r.reputation)}</td></tr>`).join('')}</table></div>
+      <div class="card"><div class="seal-h">${icon('shop', 28, { variant: 'seal' })}<h3>Restaurants</h3></div><div class="stats-tbl-wrap"><table class="stats-tbl"><tr><th>Location</th><th>Served</th><th>Revenue</th><th>Rating</th></tr>
+        ${rests.map((r) => `<tr><td>${esc(r.name)}</td><td>${exact(r.served)}</td><td title="${yenExact(r.revenue)}">${yen(r.revenue)}</td><td title="${r.reputation.toFixed(1)} stars">${stars(r.reputation)}</td></tr>`).join('')}</table></div></div>
     </div>`;
 
   // ---- charts
   const box = root.querySelector<HTMLElement>('[data-charts]')!;
   if (h.length < 2) {
     const d = h[0];
-    box.innerHTML = `<div class="card muted">Daily charts appear once two business days have closed.${d
-      ? ` Day ${d.day}: ${yenExact(d.revenue)} revenue, ${yenExact(d.expenses)} expenses, ${exact(d.pieces)} pieces, ${exact(d.customers)} guests.` : ''}</div>`;
+    box.innerHTML = `<div class="card muted section">Daily charts appear once two business days have closed.${d
+      ? ` Day ${d.day}: ${yenExact(d.revenue)} revenue, ${yenExact(d.expenses)} running costs, ${exact(d.pieces)} pieces, ${exact(d.customers)} guests.` : ''}</div>`;
     return root;
   }
   const rev = h.map((d) => d.revenue), exp = h.map((d) => d.expenses), pro = h.map((d) => d.revenue - d.expenses);
@@ -135,19 +129,19 @@ export function statsPanel(s: GameState): HTMLElement {
   const span = `days ${h[0].day}–${h[h.length - 1].day}`;
   const best = h.reduce((a, d) => (d.revenue - d.expenses > a.revenue - a.expenses ? d : a));
   const money: Series[] = [
-    { label: 'Revenue', color: C.ai, vals: rev, kind: 'bar' },
-    { label: 'Expenses', color: C.shu, vals: exp, kind: 'bar' },
-    { label: 'Profit', color: C.kin, vals: pro, kind: 'line' },
+    { label: 'Revenue', color: C.matcha, vals: rev, kind: 'bar' },
+    { label: 'Running costs', color: C.shu, vals: exp, kind: 'bar' },
+    { label: 'Operating profit', color: C.kin, vals: pro, kind: 'line' },
   ];
   const volume: Series[] = [
-    { label: 'Pieces', color: C.matcha, vals: pcs, kind: 'line' },
-    { label: 'Customers', color: C.ai, vals: cus, kind: 'line' },
+    { label: 'Pieces', color: C.kin, vals: pcs, kind: 'line' },
+    { label: 'Customers', color: C.wood, vals: cus, kind: 'line' },
   ];
-  const h3 = (t: string, ser: Series[]) => el('h3', '', `${t} ${legend(ser)}`);
+  const head = (t: string, ser: Series[]) => el('div', 'stats-h', `<h3>${t}</h3>${legend(ser)}`);
   box.append(
-    h3(`Money · last ${h.length} days`, money),
-    chart(h, money, `Revenue, expenses and profit for ${span}. Total revenue ${yenExact(sum(rev))}, expenses ${yenExact(sum(exp))}, profit ${yenExact(sum(pro))}. Best day ${best.day} with ${yenExact(best.revenue - best.expenses)} profit.`, yen),
-    Object.assign(h3('Pieces & guests', volume), { style: 'margin-top:18px' }),
+    head(`Money · last ${h.length} days`, money),
+    chart(h, money, `Revenue, running costs and operating profit for ${span}. Total revenue ${yenExact(sum(rev))}, costs ${yenExact(sum(exp))}, profit ${yenExact(sum(pro))}. Best day ${best.day} with ${yenExact(best.revenue - best.expenses)} profit.`, yen),
+    head('Pieces & guests', volume),
     chart(h, volume, `Pieces sold and customers per day for ${span}. ${exact(sum(pcs))} pieces and ${exact(sum(cus))} customers in total, averaging ${exact(sum(pcs) / h.length)} pieces and ${exact(sum(cus) / h.length)} customers a day.`, short),
   );
   return root;

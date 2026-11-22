@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buyout, fire, hire } from '../src/core/actions';
-import { acceptOrder, finishManual, makeCandidate, settle, tickRestaurant } from '../src/core/sim';
+import { fire, hire } from '../src/core/actions';
+import { acceptOrder, makeCandidate, settle, tickRestaurant } from '../src/core/sim';
 import {
-  SAVE_KEY, createNewState, deserialize, exportSave, importSave, loadFromStorage, saveToStorage, serialize,
+  GameState, SAVE_KEY, createNewState, deserialize, exportSave, importSave, loadFromStorage, saveToStorage, serialize,
 } from '../src/core/state';
 
 const BACKUP_KEY = `${SAVE_KEY}-backup`;
@@ -21,6 +21,12 @@ class MemoryStorage implements Storage {
 }
 
 afterEach(() => vi.restoreAllMocks());
+
+/** Test shortcut: the kitchen finishes this ticket now. */
+function cook(s: GameState, restId: string, id: number): void {
+  const r = s.restaurants[restId], i = r.orders.findIndex((t) => t.id === id);
+  r.ready.push(...r.orders.splice(i, 1).map((t) => ({ ...t, started: true, progress: t.pieces, quality: 0.6 })));
+}
 
 describe('save recovery', () => {
   it('retains the valid backup when the corrupt primary cannot be replaced', () => {
@@ -79,8 +85,7 @@ describe('save snapshots', () => {
     const state = createNewState();
     const first = acceptOrder(state, STAND, { ...SALMON_ORDER, pieces: 2, customerId: null });
     const second = acceptOrder(state, STAND, { ...SALMON_ORDER, pieces: 3, customerId: null });
-    if (first === 'nostock' || second === 'nostock') throw new Error('Fixture requires salmon');
-    expect(finishManual(state, STAND, first.id, 1)).toBe(true);
+    cook(state, STAND, first.id);
     const legacy = JSON.parse(serialize(state));
     delete legacy.nextTicketId;
     legacy.restaurants[STAND].ready[0].id = second.id;
@@ -88,26 +93,12 @@ describe('save snapshots', () => {
     const loaded = deserialize(JSON.stringify(legacy));
     const rest = loaded.restaurants[STAND];
     const newTicket = acceptOrder(loaded, STAND, { ...SALMON_ORDER, pieces: 4, customerId: 1 });
-    if (newTicket === 'nostock') throw new Error('Fixture requires salmon');
     expect(new Set([...rest.orders, ...rest.ready].map((ticket) => ticket.id)).size).toBe(3);
-    expect(finishManual(loaded, STAND, newTicket.id, 1)).toBe(true);
+    cook(loaded, STAND, newTicket.id);
     expect(settle(loaded, STAND, newTicket.id, 5)?.paid).toBe(480);
     expect(rest.ready.map((ticket) => ticket.pieces)).toEqual([2]);
     expect(rest.orders.map((ticket) => ticket.pieces)).toEqual([3]);
     expect(deserialize(serialize(loaded)).nextTicketId).toBe(newTicket.id + 1);
-  });
-
-  it('keeps a rival buyout after reload while retaining other markets', () => {
-    const storage = new MemoryStorage();
-    const state = createNewState();
-    state.flags.chapter2 = true;
-    state.cash = 1e9;
-    expect(buyout(state, 'kaiten', 'asakusa')).toBeNull();
-
-    expect(saveToStorage(state, storage)).toBe(true);
-    const loaded = loadFromStorage(storage);
-    expect(loaded?.rivals.kaiten.asakusa).toBeUndefined();
-    expect(loaded?.rivals.kaiten.shibuya).toBe(state.rivals.kaiten.shibuya);
   });
 
   it('timestamps an export without updating the active save timestamp', () => {
@@ -121,28 +112,23 @@ describe('save snapshots', () => {
   });
 });
 
-it('clears stranded takeout and refunds their ingredients when the last server leaves', () => {
+it('clears pending takeout (no sale, no cost) when the last chef leaves; visible guests keep their order', () => {
   const state = createNewState();
   state.lifetime.pieces = 60;
   state.cash = 100_000;
   const chef = makeCandidate(state, 'chef');
-  const server = makeCandidate(state, 'server');
-  state.candidates.push(chef, server);
+  state.candidates.push(chef);
   expect(hire(state, chef.id, STAND)).toBeNull();
-  expect(hire(state, server.id, STAND)).toBeNull();
 
   const ready = acceptOrder(state, STAND, { ...SALMON_ORDER, pieces: 2, customerId: null });
-  if (ready === 'nostock') throw new Error('Fixture requires salmon');
-  expect(finishManual(state, STAND, ready.id, 1)).toBe(true);
+  cook(state, STAND, ready.id);
   acceptOrder(state, STAND, { ...SALMON_ORDER, pieces: 3, customerId: null });
-  const visible = acceptOrder(state, STAND, { ...SALMON_ORDER, pieces: 4, customerId: 1, manualOnly: true });
-  expect(fire(state, server.id)).toBeNull();
+  const visible = acceptOrder(state, STAND, { ...SALMON_ORDER, pieces: 4, customerId: 1 });
+  expect(fire(state, chef.id)).toBeNull();
   const cash = state.cash;
 
   tickRestaurant(state, STAND, 1, 'asakusa');
   tickRestaurant(state, STAND, 1, 'asakusa');
-  expect(state.inventory.salmon).toBe(15);
-  expect(state.inventory.rice).toBe(30);
   expect(state.lifetime.lost).toBe(2);
   expect(state.cash).toBe(cash);
   expect(state.restaurants[STAND].ready).toEqual([]);

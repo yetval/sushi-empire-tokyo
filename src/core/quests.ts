@@ -1,5 +1,5 @@
 // Daily objectives: three small side quests per in-game day. Pure logic on GameState: no three.js, no DOM.
-// The game feeds questOnEvent() from the places where things happen (sales, cooking, purchases, day end).
+// The game feeds questOnEvent() from the places where things happen (sales, hires, purchases, day end).
 import { toast } from './bus';
 import {
   AREAS, CLOSE_MIN, CustomerType, isWalkable, DAY_SECONDS, DISTRICTS, DistrictId, MAX_SKILL, OPEN_MIN, PROPERTIES, RECIPES, ROLES,
@@ -10,8 +10,8 @@ import * as sim from './sim';
 import type { GameState } from './state';
 
 export type QuestKind =
-  | 'serve' | 'office' | 'recipe' | 'district' | 'earn' | 'perfect' | 'stars' | 'vip'
-  | 'travel' | 'campaign' | 'hire' | 'train' | 'lunch' | 'clean' | 'upgrade';
+  | 'serve' | 'office' | 'recipe' | 'district' | 'earn' | 'stars' | 'vip'
+  | 'travel' | 'campaign' | 'hire' | 'train' | 'lunch' | 'upgrade';
 
 export interface Quest {
   id: string; kind: QuestKind; title: string; desc: string;
@@ -25,20 +25,16 @@ export interface QuestState { day: number; list: Quest[]; streak: number }
 
 export type QuestEvent =
   | { type: 'sale'; restaurant: string; recipe: string; pieces: number; revenue: number; customerType: CustomerType }
-  | { type: 'manualCook'; restaurant: string; score: number }
   | { type: 'customerLeft'; restaurant: string; reason: 'patience' | 'nostock' | 'closed' }
   | { type: 'upgrade'; restaurant: string; upgrade: string }
   | { type: 'hire'; role: Role }
   | { type: 'train'; role: Role }
   | { type: 'campaign'; id: string }
   | { type: 'travel'; district: DistrictId }
-  | { type: 'clean'; restaurant: string; cleanlinessBefore: number }
   | { type: 'dayEnd' };
 
 export const QUESTS_PER_DAY = 3;
 export const REVENUE_FLOOR = 5_000; // a brand-new stand's day
-export const PERFECT_SCORE = 0.9;
-export const DIRTY = 0.75; // "clean while dirty" threshold (player can clean below 0.85)
 export const STAR_GOAL = 4.5;
 export const LUNCH: [number, number] = [11 * 60, 14 * 60];
 export const STREAK_CAP = 6; // bonus stops growing after this many perfect days
@@ -47,7 +43,6 @@ export function createQuestState(): QuestState { return { day: 0, list: [], stre
 
 // ---------------------------------------------------------------- estimates
 const PIECES_PER_GUEST = 3;
-const MANUAL_GUESTS_PER_MIN = 2.2; // one player cooking by hand (matches the balance bot)
 const SLOT = 30; // game minutes per integration step
 const REAL_MIN_PER_SLOT = (SLOT * DAY_SECONDS) / 1440 / 60;
 
@@ -59,16 +54,13 @@ interface Flow {
 /** Expected guests / pieces / sales revenue over a span of opening hours, limited by kitchen capacity. */
 function flow(s: GameState, from = OPEN_MIN, to = 1440 + CLOSE_MIN): Flow {
   const f: Flow = { guests: 0, office: 0, pieces: 0, sales: 0, byRecipe: {}, byDistrict: {} };
-  let manual = MANUAL_GUESTS_PER_MIN; // ponytail: the player's hands go to the first non-automated restaurant only
   for (const id of Object.keys(s.restaurants)) {
     const r = s.restaurants[id], d = PROPERTIES[id].district;
     const menu = r.menu.filter((m) => s.recipes.includes(m));
-    if (!menu.length) continue;
+    if (!menu.length || !sim.isAutomated(s, id)) continue; // no chef, no sales
     const price = (menu.reduce((a, m) => a + RECIPES[m].price, 0) / menu.length) * r.priceMult;
     const prep = menu.reduce((a, m) => a + RECIPES[m].prep / 3.5, 0) / menu.length;
-    let cap: number;
-    if (sim.isAutomated(s, id)) cap = (sim.kitchenRate(s, id) * 60) / prep / PIECES_PER_GUEST;
-    else { cap = manual; manual = 0; }
+    const cap = (sim.kitchenRate(s, id) * 60) / prep / PIECES_PER_GUEST;
     let g = 0;
     for (let m = from; m < to; m += SLOT) g += Math.min(sim.demandPerMin(s, id, m % 1440), cap) * REAL_MIN_PER_SLOT;
     const mix = AREAS[d].mix, total = Object.values(mix).reduce((a, w) => a + (w ?? 0), 0);
@@ -147,22 +139,15 @@ const KINDS: Record<QuestKind, KindDef> = {
     w: 0.3, ok: () => true,
     make: (_, { f }) => { const n = nice(Math.max(1_000, 0.4 * f.sales)); return { title: 'Ka-ching Chōchin', desc: `Earn ${yen(n)} from sushi sales today.`, target: n }; },
   },
-  perfect: {
-    w: 0.3, ok: () => true,
-    make: (s) => {
-      const n = s.lifetime.manualOrders < 10 ? 1 : s.lifetime.manualOrders < 100 ? 2 : 3;
-      return { title: 'Master Itamae', desc: `Cook ${plural(n, 'Perfect order')} by hand (score above 90%).`, target: n };
-    },
-  },
   stars: {
     w: 0.35, ok: (s) => s.lifetime.pieces >= 1_000 && Object.values(s.restaurants).some((r) => r.reputation >= 3.8),
     make: (s) => {
       const best = Object.values(s.restaurants).reduce((a, r) => (r.reputation > a.reputation ? r : a));
-      return { title: 'Five-Star Omotenashi', desc: `End the day with ${best.name} at ${STAR_GOAL}★ or better.`, target: 1, meta: { restaurant: best.id } };
+      return { title: 'Five-Star Omotenashi', desc: `End the day with ${best.name} at ${STAR_GOAL} stars or better.`, target: 1, meta: { restaurant: best.id } };
     },
   },
   vip: {
-    w: 0.3, ok: (s) => (s.lifetime.pieces > 5_000 && s.flags.vipEnabled !== false) || s.event?.id === 'critic',
+    w: 0.3, ok: (s) => (s.lifetime.pieces > 5_000 && s.flags.vipEnabled !== false),
     make: () => ({ title: 'Red Carpet Service', desc: 'Serve 1 VIP guest or food critic.', target: 1 }),
   },
   travel: {
@@ -192,10 +177,6 @@ const KINDS: Record<QuestKind, KindDef> = {
       const n = Math.min(15, nice(Math.max(2, 0.4 * lunchGuests)));
       return { title: 'Lunch Rush Hero', desc: `Serve ${plural(n, 'customer')} in the 11:00–14:00 rush with zero walk-outs.`, target: n };
     },
-  },
-  clean: {
-    w: 0.17, ok: (s) => s.lifetime.pieces >= 300 && Object.keys(s.restaurants).some((id) => !sim.staffAt(s, id, 'cleaner').length),
-    make: () => ({ title: 'Spotless Shop', desc: `Clean 1 restaurant while it is below ${DIRTY * 100}% cleanliness.`, target: 1 }),
   },
   upgrade: {
     w: 0.2, ok: (s) => Object.values(s.restaurants).some((r) => Object.values(UPGRADES).some((u) => (r.upgrades[u.id] ?? 0) < u.max)),
@@ -237,7 +218,7 @@ export function ensureQuests(q: QuestState, s: GameState, rng: () => number = Ma
   // finished-but-unclaimed quests (e.g. 'stars', which completes at day end) are paid out, not lost
   const auto = q.list.filter((x) => x.done && !x.claimed);
   for (const x of auto) claimQuest(q, s, x.id);
-  if (auto.length) toast(`📜 Yesterday's finished requests were paid out automatically (${auto.length}).`, 'good');
+  if (auto.length) toast(`Yesterday's finished requests were paid out automatically (${auto.length}).`, 'good', 'scroll');
   if (q.list.some((x) => !x.done)) q.streak = 0;
   q.day = s.day;
   q.list = rollDailyQuests(s, rng);
@@ -261,13 +242,11 @@ function step(x: Quest, s: GameState, ev: QuestEvent): void {
     case 'recipe': if (ev.type === 'sale' && ev.recipe === m.recipe) bump(x, ev.pieces); break;
     case 'district': if (ev.type === 'sale' && PROPERTIES[ev.restaurant]?.district === m.district) bump(x, ev.pieces); break;
     case 'earn': if (ev.type === 'sale') bump(x, ev.revenue); break;
-    case 'perfect': if (ev.type === 'manualCook' && ev.score > PERFECT_SCORE) bump(x, 1); break;
     case 'upgrade': if (ev.type === 'upgrade') bump(x, 1); break;
     case 'hire': if (ev.type === 'hire') bump(x, 1); break;
     case 'train': if (ev.type === 'train') bump(x, 1); break;
     case 'campaign': if (ev.type === 'campaign') bump(x, 1); break;
     case 'travel': if (ev.type === 'travel' && ev.district === m.district) bump(x, 1); break;
-    case 'clean': if (ev.type === 'clean' && ev.cleanlinessBefore < DIRTY) bump(x, 1); break;
     case 'stars': if (ev.type === 'dayEnd' && (s.restaurants[m.restaurant ?? '']?.reputation ?? 0) >= STAR_GOAL) bump(x, 1); break;
     case 'lunch':
       if (m.failed) break;

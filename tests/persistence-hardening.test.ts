@@ -17,14 +17,14 @@ class MemStorage { m = new Map<string, string>(); getItem(k: string) { return th
 const mem = () => new MemStorage() as unknown as Storage & MemStorage;
 const BACKUP = SAVE_KEY + '-backup';
 
-function hire(st: GameState, role: 'chef' | 'server' | 'cleaner' | 'manager', rest: string | null) {
+function hire(st: GameState, role: 'chef' | 'server' | 'manager', rest: string | null) {
   const c = sim.makeCandidate(st, role); st.candidates.push(c); st.cash += 1e9;
   const p = st.lifetime.pieces; st.lifetime.pieces = Math.max(p, 1e5);
   expect(A.hire(st, c.id, rest)).toBeNull();
   st.cash -= 1e9; st.lifetime.pieces = p;
 }
 
-/** A state that has been played for a while: staff, a second shop, tickets in flight, flags, a bought-out rival. */
+/** A state that has been played for a while: staff, a second shop, tickets in flight, flags. */
 function playedState(): GameState {
   const s = createNewState('Kenji', 'Sushi Co');
   sim.refreshCandidates(s);
@@ -33,15 +33,11 @@ function playedState(): GameState {
   s.districts.push('shibuya');
   expect(A.buyProperty(s, 'shibuya_crossing')).toBeNull();
   hire(s, 'chef', 'asakusa_stand'); hire(s, 'server', 'asakusa_stand'); hire(s, 'manager', 'asakusa_stand');
-  hire(s, 'chef', 'shibuya_crossing'); hire(s, 'cleaner', null);
-  for (const k of INGREDIENT_IDS) s.inventory[k] = 40;
-  s.restock.salmon = 60;
+  hire(s, 'chef', 'shibuya_crossing'); hire(s, 'server', null);
   s.flags.chapter2 = true; s.flags.boughtOnce = true;
-  expect(A.buyout(s, 'maguro', 'shibuya')).toBeNull();
   expect(A.launchCampaign(s, 'newspaper')).toBeNull();
   for (let i = 0; i < 1500; i++) sim.tick(s, 0.2, { activeDistrict: 'asakusa' });
-  s.inventory.rice += 10; s.inventory.salmon += 10;
-  expect(sim.acceptOrder(s, 'asakusa_stand', { recipe: 'salmon_nigiri', pieces: 3, type: 'vip', customerId: 7, manualOnly: true })).not.toBe('nostock');
+  sim.acceptOrder(s, 'asakusa_stand', { recipe: 'salmon_nigiri', pieces: 3, type: 'vip', customerId: 7 });
   return s;
 }
 
@@ -55,21 +51,18 @@ describe('round-trip', () => {
     const json = serialize(s, 1_700_000_000_000);
     const loaded = deserialize(json);
     expect(loaded).toEqual({ ...s, lastSaved: 1_700_000_000_000 });
-    expect(loaded.rivals.maguro.shibuya).toBeUndefined(); // buyout survives
     expect(serialize(loaded, 1_700_000_000_000)).toBe(json); // byte-stable: re-saving changes nothing
   });
 
   it('a loaded game keeps simulating identically to the original', () => {
     const a = playedState();
     const b = deserialize(serialize(a, a.lastSaved));
-    // 495 = 45 full cycles of sim.ts's module-level restockTimer (11 × 0.2s), so b starts in the same phase as a.
     sim.setRandom(seeded(9));
     for (let i = 0; i < 495; i++) sim.tick(a, 0.2, { activeDistrict: null });
     sim.setRandom(seeded(9));
     for (let i = 0; i < 495; i++) sim.tick(b, 0.2, { activeDistrict: null });
     expect(b.cash).toBe(a.cash);
     expect(b.lifetime).toEqual(a.lifetime);
-    expect(b.inventory).toEqual(a.inventory);
   });
 });
 
@@ -100,19 +93,26 @@ describe('migrate', () => {
     expect(s.settings.quality).toBe('high');
     expect(s.version).toBe(SAVE_VERSION);
     expect(s.nextTicketId).toBe(1);
-    expect(s.rivals).toEqual(createNewState().rivals);
     // the migrated save is fully playable and stable under a second migration
     for (let i = 0; i < 200; i++) sim.tick(s, 0.5, { activeDistrict: 'shibuya' });
     expect(migrate(JSON.parse(serialize(s, 1)))).toEqual({ ...s, lastSaved: 1 });
   });
 
-  it('fills missing rivals but keeps per-district buyouts of the rivals it has', () => {
+  it('v1 saves: cleaners become servers, retired research/upgrades are dropped, the tutorial resumes at "hire a chef"', () => {
     const raw = JSON.parse(serialize(createNewState()));
-    raw.rivals = { kaiten: { shibuya: 0.2 } };
+    raw.version = 1; raw.tutorial = 4;
+    raw.staff = [{ id: 1, role: 'cleaner', skill: 3, xp: 0, wage: 1, restaurant: 'asakusa_stand' }];
+    raw.candidates = [{ id: 2, role: 'cleaner' }];
+    raw.research = ['knife_skills', 'auto_restock'];
+    raw.restaurants.asakusa_stand.upgrades = { sign: 1, cleaning: 2 };
+    raw.rivals = { kaiten: { shibuya: 0.2 } }; raw.event = { id: 'festival', endsDay: 9 }; raw.contracts = { active: [] };
     const s = deserialize(JSON.stringify(raw));
-    expect(s.rivals.kaiten).toEqual({ shibuya: 0.2 });
-    expect(s.rivals.maguro).toEqual(createNewState().rivals.maguro);
-    expect(s.rivals.golden).toEqual(createNewState().rivals.golden);
+    expect(s.staff[0]).toMatchObject({ role: 'server', skill: 3, wage: wageFor('server', 3), restaurant: 'asakusa_stand' });
+    expect(s.candidates[0].role).toBe('server');
+    expect(s.research).toEqual(['knife_skills']);
+    expect(s.restaurants.asakusa_stand.upgrades).toEqual({ sign: 1 });
+    expect(s.tutorial).toBe(1);
+    expect(s.version).toBe(SAVE_VERSION);
   });
 
   it('fills a restaurant that is missing its nested fields', () => {
@@ -218,9 +218,6 @@ describe('hostile saves', () => {
     ['null staff entry', (r) => { r.staff = [null]; }],
     ['staff not an array', (r) => { r.staff = 'everyone'; }],
     ['unknown campaign', (r) => { r.campaigns = [{ id: 'mind_control', district: null, endsDay: 9, endsMinute: 0 }]; }],
-    ['unknown event', (r) => { r.event = { id: 'meteor', endsDay: 5 }; }],
-    ['event as string', (r) => { r.event = 'festival'; }],
-    ['unknown rival', (r) => { r.rivals.evil_corp = { asakusa: 0.5 }; }],
     ['rivals not an object', (r) => { r.rivals = 5; }],
     ['fractional milestoneIndex', (r) => { r.milestoneIndex = 1.5; }],
     ['milestoneIndex as string', (r) => { r.milestoneIndex = '3'; }],
@@ -287,7 +284,6 @@ describe('hostile saves', () => {
       { id: 99, role: 'server', restaurant: 'asakusa_stand', skill: '§INF', wage: '§INF' },
     ];
     raw.candidates = [{ id: 100, role: 'manager' }];
-    for (const k of INGREDIENT_IDS) raw.inventory[k] = 200;
     const s = deserialize(JSON.stringify(raw).replaceAll('"§INF"', '1e400'));
     for (const e of [...s.staff, ...s.candidates]) {
       expect(Number.isFinite(e.skill) && Number.isFinite(e.wage) && Number.isFinite(e.xp)).toBe(true);

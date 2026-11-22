@@ -2,8 +2,9 @@
 // DOM is built once; render() only patches text/attributes that changed (values tick every SNAP_EVERY).
 import { milestone } from '../../core/data';
 import { clockStr, exact, short, yen } from '../../core/format';
-import { holiday, season } from '../../core/seasons';
 import { nextMilestone } from '../../core/sim';
+import { rollNumber } from '../fx';
+import { icon } from '../icons';
 import { BAND_MARK, Ctx, Part, Snap, spark } from './shared';
 import './strip.css';
 
@@ -12,9 +13,12 @@ const TILES: [K, string, string][] = [
   ['cash', 'Cash', '金'], ['profit', 'Net/day', '益'], ['pieces', 'Pieces', '貫'], ['stars', 'Rating', '星'], ['alerts', 'Alerts', '報'],
 ];
 // [speed (0 = pause), glyph, aria-label, key]
-const SPEEDS: [0 | 1 | 2 | 4, string, string, string][] = [[0, '⏸', 'Pause', ''], [1, '▶', 'Speed 1×', '1'], [2, '▶▶', 'Speed 2×', '2'], [4, '▶▶▶', 'Speed 4×', '3']];
+const PAUSE = icon('pause', 12);
+const SPEEDS: [0 | 1 | 2 | 4, string, string, string][] = [[0, PAUSE, 'Pause', ''], [1, '▶', 'Speed 1×', '1'], [2, '▶▶', 'Speed 2×', '2'], [4, '▶▶▶', 'Speed 4×', '3']];
 
 const txt = (el: Element, v: string) => { if (el.textContent !== v) el.textContent = v; };
+/** innerHTML, written only when the source string changed (serialised SVG never equals its source, so don't compare innerHTML). */
+const html = (el: HTMLElement, v: string) => { if (el.dataset.h !== v) { el.dataset.h = v; el.innerHTML = v; } };
 const attr = (el: Element, k: string, v: string) => { if (el.getAttribute(k) !== v) el.setAttribute(k, v); };
 const yenWords = (n: number) => `${n < 0 ? 'minus ' : ''}${exact(Math.abs(n))} yen`;
 
@@ -23,7 +27,7 @@ interface Tile { li: HTMLLIElement; sr: HTMLElement; val: HTMLElement; dlt: HTML
 export class Strip implements Part {
   readonly el = document.createElement('div');
   private readonly btns: HTMLButtonElement[] = [];
-  private readonly cal: { day: HTMLElement; season: HTMLElement; hol: HTMLElement };
+  private readonly day: HTMLElement;
   private readonly tiles = {} as Record<K, Tile>;
 
   constructor(private ctx: Ctx) {
@@ -31,10 +35,9 @@ export class Strip implements Part {
     this.el.innerHTML = `
       <div class="dc-strip-time">
         <div class="dc-strip-spd" role="group" aria-label="Time speed">${SPEEDS.map(([n, g, label, key]) =>
-          `<button type="button" data-n="${n}" aria-label="${label}" aria-pressed="false" title="${label}${key ? ` (key ${key})` : ''}"><span aria-hidden="true">${g}</span>${key ? `<kbd aria-hidden="true">${key}</kbd>` : ''}</button>`).join('')}</div>
+          `<button type="button" class="btn small" data-n="${n}" aria-label="${label}" aria-pressed="false" title="${label}${key ? ` (key ${key})` : ''}"><span aria-hidden="true">${g}</span>${key ? `<kbd class="kbd" aria-hidden="true">${key}</kbd>` : ''}</button>`).join('')}</div>
         <div class="dc-strip-cal">
           <div class="d"></div>
-          <div class="s"><span class="se"></span><span class="hol" hidden></span></div>
         </div>
       </div>
       <ul class="dc-strip-kpis" aria-label="Empire at a glance">${TILES.map(([k, label, jp]) => `
@@ -42,7 +45,7 @@ export class Strip implements Part {
           <span class="dc-sr"></span>
           <div class="v" aria-hidden="true">
             <span class="lbl">${label}<i>${jp}</i></span>
-            <b class="val"></b>
+            <b class="val num"></b>
             <span class="dlt"></span>
             <span class="sp"></span>
             ${k === 'pieces' ? '<span class="bar"><i></i></span>' : ''}
@@ -58,7 +61,7 @@ export class Strip implements Part {
         this.syncTime();
       });
     });
-    this.cal = { day: q('.dc-strip-cal .d'), season: q('.dc-strip-cal .se'), hol: q('.dc-strip-cal .hol') };
+    this.day = q('.dc-strip-cal .d');
     for (const [k] of TILES) {
       const li = q<HTMLLIElement>(`.dc-kpi[data-k="${k}"]`);
       this.tiles[k] = { li, sr: q('.dc-sr', li), val: q('.val', li), dlt: q('.dlt', li), sp: q('.sp', li), spKey: '\0', bar: q('.bar i', li) ?? undefined };
@@ -81,11 +84,7 @@ export class Strip implements Part {
     this.syncTime();
 
     // calendar
-    const se = season(s), hol = holiday(s);
-    txt(this.cal.day, `Day ${s.day} · ${clockStr(s.minute)}`);
-    txt(this.cal.season, `${se.emoji} ${se.name} ${se.jp}`);
-    this.cal.hol.hidden = !hol;
-    if (hol) { txt(this.cal.hol, `${hol.emoji} ${hol.name}`); attr(this.cal.hol, 'title', hol.desc); }
+    txt(this.day, `Day ${s.day} · ${clockStr(s.minute)}`);
 
     // cash: end-of-day balances reconstructed backwards from today (all spending goes through sim.spend → expenses)
     const todayNet = s.today.revenue - s.today.expenses;
@@ -111,29 +110,29 @@ export class Strip implements Part {
     if (bar.style.width !== w) bar.style.width = w;
     attr(this.tiles.pieces.li, 'title', `Next: ${m.title} at ${exact(m.pieces)} pieces (${pct}%)`);
 
-    // avg ★: live value; Δ and spark from day-end samples (stars7), like the other tiles
+    // avg rating: live value; Δ and spark from day-end samples (stars7), like the other tiles
     const st = t.stars7, sLast = st.length ? st[st.length - 1] : null, sPrev = prev(st);
     const sd = sLast !== null && sPrev !== null ? Math.round((sLast - sPrev) * 10) / 10 : null;
     const fmt1 = (n: number) => n.toFixed(1);
-    this.tile('stars', t.restaurants ? `★ ${t.avgStars.toFixed(1)}` : '—', this.delta(sd, fmt1),
+    this.tile('stars', t.restaurants ? `${icon('star', 16)} ${t.avgStars.toFixed(1)}` : '—', this.delta(sd, fmt1),
       t.restaurants ? `Average rating ${t.avgStars.toFixed(1)} of 5 stars across ${t.restaurants} restaurant${t.restaurants === 1 ? '' : 's'}. ${this.deltaWords(sd, fmt1, 'yesterday vs day before')}` : 'Average rating: no restaurants yet.',
-      st.map((v) => v - Math.min(...st))); // ponytail: spark() floors at 0, so shift ★ to show day-to-day shape
+      st.map((v) => v - Math.min(...st))); // ponytail: spark() floors at 0, so shift ratings to show day-to-day shape
 
     // alerts by severity
     const n = { critical: 0, warning: 0, opportunity: 0 };
     for (const a of snap.alerts) n[a.severity]++;
     const al = this.tiles.alerts, total = snap.alerts.length;
     txt(al.val, total ? String(total) : `${BAND_MARK.good.glyph} All quiet`);
-    const html = total
-      ? [n.critical && `<span class="crit">${BAND_MARK.act.glyph} ${n.critical}<i> act now</i></span>`, n.warning && `<span>${BAND_MARK.watch.glyph} ${n.warning}</span>`, n.opportunity && `<span class="opp">✦ ${n.opportunity}</span>`].filter(Boolean).join('')
+    const dl = total
+      ? [n.critical && `<span class="crit">${BAND_MARK.act.glyph} ${n.critical}<i> act now</i></span>`, n.warning && `<span>${BAND_MARK.watch.glyph} ${n.warning}</span>`, n.opportunity && `<span class="opp">${icon('sparkle', 11)} ${n.opportunity}</span>`].filter(Boolean).join('')
       : '<span>Nothing needs you</span>';
-    if (al.dlt.innerHTML !== html) al.dlt.innerHTML = html;
+    html(al.dlt, dl);
     al.li.classList.toggle('has-crit', n.critical > 0);
     txt(al.sr, total ? `Alerts: ${total} open — ${n.critical} act now, ${n.warning} to watch, ${n.opportunity} ${n.opportunity === 1 ? 'opportunity' : 'opportunities'}.` : 'Alerts: all quiet.');
   }
 
   private money(k: K, v: number, d: number | null, series: number[], label: string, vs: string, none = false): void {
-    this.tile(k, none ? '—' : yen(v), this.delta(d, yen), `${label}: ${none ? 'no full day yet' : yenWords(v)}. ${this.deltaWords(d, yenWords, vs)}`, series);
+    this.tile(k, none ? '—' : yen(v), this.delta(d, yen), `${label}: ${none ? 'no full day yet' : yenWords(v)}. ${this.deltaWords(d, yenWords, vs)}`, series, k === 'cash' ? v : undefined);
   }
 
   /** Visible Δ: arrow + amount (never colour alone). */
@@ -148,9 +147,11 @@ export class Strip implements Part {
     return d === 0 ? `Unchanged ${vs}.` : `${d > 0 ? 'Up' : 'Down'} ${f(Math.abs(d))} ${vs}.`;
   }
 
-  private tile(k: K, val: string, d: { text: string; dir: string }, sr: string, series: number[]): void {
+  /** val may be markup (the rating star); everything else in a tile is plain text. */
+  private tile(k: K, val: string, d: { text: string; dir: string }, sr: string, series: number[], roll?: number): void {
     const tl = this.tiles[k];
-    txt(tl.val, val);
+    if (roll !== undefined) rollNumber(tl.val, roll, yen); // cash rolls on change only (same target = no-op)
+    else html(tl.val, val);
     txt(tl.dlt, d.text);
     attr(tl.dlt, 'data-dir', d.dir);
     txt(tl.sr, sr);

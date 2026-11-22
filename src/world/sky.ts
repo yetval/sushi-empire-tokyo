@@ -1,32 +1,42 @@
-// Sky: gradient dome, sun/moon, stars, day-night lighting keyframes, fog, rain and fireworks.
+// Sky: soft gradient dome, sun/moon, stars, day-night lighting keyframes, fog, rain and fireworks.
 import * as THREE from 'three';
 import { RADIAL } from './kit';
+import { initMaterials, setMaterialNight } from './materials';
+import { weather } from './weather';
 
 interface Key { h: number; top: string; hor: string; sun: string; sunI: number; sky: string; gnd: string; hemiI: number; night: number }
-const NIGHT = { top: '#0b1236', hor: '#2c3570', sun: '#9db2ff', sunI: 0.7, sky: '#5b6cb8', gnd: '#2e2c40', hemiI: 1.0, night: 1 };
+// Studio-light palette for an architectural model: a warm key, a cool clean fill, pale hazy skies by day,
+// a dark warm navy-charcoal by night with low ambient, so street lamps, lit windows and neon carry the scene (materials.ts).
+const NIGHT = { top: '#0a0d18', hor: '#24232f', sun: '#bdb3c4', sunI: 0.38, sky: '#484a62', gnd: '#2f2824', hemiI: 1.35, night: 1 };
 const KEYS: Key[] = [
   { h: 0, ...NIGHT },
   { h: 4.6, ...NIGHT },
-  { h: 5.4, top: '#25407e', hor: '#7a86c8', sun: '#a9b8ff', sunI: 0.6, sky: '#7d8fd6', gnd: '#3a3650', hemiI: 0.95, night: 0.8 }, // dawn blue hour
-  { h: 6.2, top: '#5a76b8', hor: '#ffb08a', sun: '#ff9f6b', sunI: 1.5, sky: '#f3c3b0', gnd: '#9c8470', hemiI: 0.95, night: 0.3 },
-  { h: 7.6, top: '#5aa9ef', hor: '#cde9ff', sun: '#fff0d6', sunI: 2.6, sky: '#cfe8ff', gnd: '#cdb894', hemiI: 1.15, night: 0 },
-  { h: 12, top: '#3f9be8', hor: '#c6e6ff', sun: '#fff6e6', sunI: 3.0, sky: '#d6ecff', gnd: '#d4c3a0', hemiI: 1.25, night: 0 },
-  { h: 16.3, top: '#4a9ee6', hor: '#ffe6c8', sun: '#ffe2b0', sunI: 2.7, sky: '#e6e6f0', gnd: '#d4c09a', hemiI: 1.12, night: 0 },
-  { h: 17.5, top: '#6d8fd0', hor: '#ffc27a', sun: '#ffb35c', sunI: 2.4, sky: '#ffd8a8', gnd: '#b08a62', hemiI: 1.0, night: 0 }, // golden hour
-  { h: 18.35, top: '#4b5fa8', hor: '#ff8a5c', sun: '#ff7a3d', sunI: 1.3, sky: '#e8a08a', gnd: '#6e5060', hemiI: 0.9, night: 0.35 },
-  { h: 19.1, top: '#1f3a7a', hor: '#5873bf', sun: '#7aa0ff', sunI: 0.55, sky: '#6f8fd8', gnd: '#30304a', hemiI: 1.0, night: 0.85 }, // blue hour
+  { h: 5.4, top: '#241f45', hor: '#7a6584', sun: '#c2adc8', sunI: 0.5, sky: '#6a5f80', gnd: '#332b31', hemiI: 0.95, night: 0.8 }, // dawn: violet-plum
+  { h: 6.2, top: '#6c84b4', hor: '#f3c8a8', sun: '#ffb88a', sunI: 1.6, sky: '#e3cfc0', gnd: '#9c8a74', hemiI: 0.95, night: 0.3 },
+  { h: 7.6, top: '#86b0d8', hor: '#efeae0', sun: '#fff0da', sunI: 2.7, sky: '#dfe3e8', gnd: '#d3c5aa', hemiI: 1.0, night: 0 },
+  { h: 12, top: '#80aed8', hor: '#f1ede4', sun: '#fff3e0', sunI: 3.0, sky: '#e0e5ea', gnd: '#d6c8ac', hemiI: 1.05, night: 0 },
+  { h: 16.3, top: '#86afd6', hor: '#f4eadb', sun: '#ffe6c2', sunI: 2.8, sky: '#e4e2e0', gnd: '#d4c3a3', hemiI: 1.0, night: 0 },
+  { h: 17.5, top: '#8fa6cc', hor: '#fbd9ad', sun: '#ffc581', sunI: 2.5, sky: '#eadacb', gnd: '#b39878', hemiI: 0.95, night: 0 }, // golden hour
+  { h: 18.35, top: '#5d6aa0', hor: '#f2ad84', sun: '#ff9a5c', sunI: 1.4, sky: '#c9b6b4', gnd: '#64545a', hemiI: 0.95, night: 0.35 },
+  { h: 19.1, top: '#231f48', hor: '#6b5679', sun: '#b8a4c6', sunI: 0.5, sky: '#625a7e', gnd: '#2f2830', hemiI: 1.0, night: 0.85 }, // blue hour: violet-plum, a hint of blue
   { h: 20.5, ...NIGHT },
   { h: 24, ...NIGHT },
 ];
 
 const DOME_VS = `varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = modelViewMatrix * vec4(position,1.0); gl_Position = projectionMatrix * p; gl_Position.z = gl_Position.w; }`;
 const DOME_FS = `uniform vec3 top; uniform vec3 hor; uniform vec3 sunDir; uniform vec3 sunCol; varying vec3 vDir;
-void main(){ float y = vDir.y; vec3 c = mix(hor, top, smoothstep(-0.05, 0.55, y)); c = mix(c, hor * 0.85, smoothstep(0.0, -0.3, y));
- float s = max(dot(normalize(vDir), sunDir), 0.0); c += sunCol * (pow(s, 12.0) * 0.35 + pow(s, 400.0) * 1.2);
+void main(){ float y = vDir.y;
+ // long, soft falloff from a hazy horizon: a clean studio backdrop rather than a painted sky
+ vec3 c = mix(hor, top, pow(smoothstep(-0.02, 0.7, y), 0.75)); c = mix(c, hor * 0.92, smoothstep(0.0, -0.25, y));
+ float s = max(dot(normalize(vDir), sunDir), 0.0); c += sunCol * (pow(s, 6.0) * 0.12 + pow(s, 48.0) * 0.18);
  gl_FragColor = vec4(c, 1.0);
 #include <tonemapping_fragment>
  #include <colorspace_fragment>
 }`;
+
+const SHADOW_EXT = 30; // half-size of the shadow box (m): ~34 texels/m at 2048
+// fireworks: a curated hanabi palette (gold, vermilion, warm white, sakura, pale cyan) instead of random hues
+const FW = ['#ffc65a', '#ff5a3c', '#fff1d6', '#ff8fb8', '#8fe3ff', '#ffd98a'].map((c) => new THREE.Color(c));
 
 export class Sky {
   sun = new THREE.DirectionalLight('#fff4e0', 2.6);
@@ -47,10 +57,14 @@ export class Sky {
   private tmpB = new THREE.Color();
 
   constructor(private scene: THREE.Scene, _renderer: THREE.WebGLRenderer) {
+    initMaterials(_renderer); // shared studio env for glass / metal (materials.ts)
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
-    const c = this.sun.shadow.camera; c.left = -34; c.right = 34; c.top = 34; c.bottom = -34; c.near = 1; c.far = 160;
-    this.sun.shadow.bias = -0.0004; this.sun.shadow.normalBias = 0.03;
+    // tight box around the player (follows in update), soft penumbra: PCF kernel radius + a lifted shadow floor
+    const c = this.sun.shadow.camera; c.left = -SHADOW_EXT; c.right = SHADOW_EXT; c.top = SHADOW_EXT; c.bottom = -SHADOW_EXT; c.near = 1; c.far = 160;
+    this.sun.shadow.bias = -0.0003; this.sun.shadow.normalBias = 0.025;
+    this.sun.shadow.radius = 3;
+    this.sun.shadow.intensity = 0.9;
     scene.add(this.sun, this.sun.target, this.hemi);
     scene.fog = this.fog;
     scene.background = new THREE.Color('#c6e6ff');
@@ -69,7 +83,7 @@ export class Sky {
     this.stars.frustumCulled = false;
     this.dome.add(this.stars);
     this.sunDisc = new THREE.Mesh(new THREE.CircleGeometry(12, 32), new THREE.MeshBasicMaterial({ color: '#fff6d8', fog: false, transparent: true, toneMapped: false }));
-    this.moonDisc = new THREE.Mesh(new THREE.CircleGeometry(8, 32), new THREE.MeshBasicMaterial({ color: '#e8eeff', fog: false, transparent: true, toneMapped: false }));
+    this.moonDisc = new THREE.Mesh(new THREE.CircleGeometry(8, 32), new THREE.MeshBasicMaterial({ color: '#f2ecdc', fog: false, transparent: true, toneMapped: false }));
     this.dome.add(this.sunDisc, this.moonDisc);
 
     // rain: streaks in a box around the player
@@ -100,20 +114,23 @@ export class Sky {
     const a = KEYS[i], b = KEYS[i + 1];
     const t = THREE.MathUtils.smoothstep(h, a.h, b.h);
     const mix = (x: string, y: string, out: THREE.Color) => out.set(x).lerp(this.tmpB.set(y), t);
-    const rain = this.rainOn;
-    const grey = new THREE.Color('#8d97a3');
+    const rain = weather.overcast * 0.85; // greys the dome, hemi and horizon
+    const grey = this.grey.set('#8d97a3');
     mix(a.top, b.top, this.uni.top.value).lerp(grey.clone().multiplyScalar(1 - 0.6 * this.night), rain * 0.7);
     mix(a.hor, b.hor, this.uni.hor.value).lerp(grey, rain * 0.6);
     mix(a.sun, b.sun, this.uni.sunCol.value);
     this.sun.color.copy(this.uni.sunCol.value);
-    this.sun.intensity = THREE.MathUtils.lerp(a.sunI, b.sunI, t) * (1 - rain * 0.6);
+    this.sun.intensity = THREE.MathUtils.lerp(a.sunI, b.sunI, t) * weather.lightFactor;
+    this.sun.shadow.intensity = 0.9 * weather.lightFactor;
     mix(a.sky, b.sky, this.hemi.color);
     mix(a.gnd, b.gnd, this.hemi.groundColor);
     this.hemi.intensity = THREE.MathUtils.lerp(a.hemiI, b.hemiI, t) * (1 - rain * 0.2);
     this.night = THREE.MathUtils.lerp(a.night, b.night, t);
+    setMaterialNight(this.night);
     // sun arc 6:00 → 18:30; moon opposite
     const ang = ((h - 6) / 12.5) * Math.PI;
-    const sunDir = new THREE.Vector3(-Math.cos(ang) * 0.85, Math.sin(ang), 0.45).normalize();
+    // peak elevation ~52 deg: raking studio light that models the facades, never a flat top-down noon
+    const sunDir = new THREE.Vector3(-Math.cos(ang), Math.sin(ang) * 0.78, 0.6).normalize();
     this.uni.sunDir.value.copy(sunDir);
     this.sunDisc.position.copy(sunDir).multiplyScalar(290); this.sunDisc.lookAt(0, 0, 0);
     (this.sunDisc.material as THREE.MeshBasicMaterial).opacity = THREE.MathUtils.clamp(sunDir.y * 6 + 0.3, 0, 1) * (1 - rain);
@@ -125,11 +142,12 @@ export class Sky {
     this.lightDir.set(L.x, Math.max(0.35, L.y), L.z).normalize();
     (this.stars.material as THREE.PointsMaterial).opacity = this.night * (1 - rain);
     this.fog.color.copy(this.uni.hor.value).lerp(this.uni.top.value, 0.25);
-    this.fog.near = THREE.MathUtils.lerp(70, 25, rain); this.fog.far = THREE.MathUtils.lerp(240, 130, rain);
+    this.fog.near = THREE.MathUtils.lerp(120, 14, weather.fogDensity); this.fog.far = THREE.MathUtils.lerp(380, 120, weather.fogDensity); // light aerial haze only: overviews stay crisp
     (this.scene.background as THREE.Color).copy(this.fog.color);
     return this.night;
   }
   private lightDir = new THREE.Vector3(0.3, 1, 0.4);
+  private grey = new THREE.Color();
 
   setRain(on: boolean): void { this.rainTarget = on ? 1 : 0; }
 
@@ -148,7 +166,7 @@ export class Sky {
     this.center.copy(playerPos);
     this.dome.position.copy(playerPos);
     // shadow camera follows the player, snapped to texels to avoid shimmering
-    const step = 68 / this.sun.shadow.mapSize.x;
+    const step = (2 * SHADOW_EXT) / this.sun.shadow.mapSize.x;
     const cx = Math.round(playerPos.x / step) * step, cz = Math.round(playerPos.z / step) * step;
     this.sun.target.position.set(cx, 0, cz);
     this.sun.position.set(cx, 0, cz).addScaledVector(this.lightDir, 70);
@@ -215,8 +233,7 @@ export class Sky {
 
   private burst(x: number, y: number, z: number): void {
     const d = this.fwData;
-    const col = new THREE.Color().setHSL(Math.random(), 0.9, 0.6);
-    const col2 = new THREE.Color().setHSL(Math.random(), 0.9, 0.65);
+    const col = FW[Math.floor(Math.random() * FW.length)], col2 = FW[Math.floor(Math.random() * FW.length)];
     const n = 140 + Math.floor(Math.random() * 90), sp = 9 + Math.random() * 6;
     for (let j = 0; j < n; j++) {
       const i = this.alloc(); if (i < 0) return;

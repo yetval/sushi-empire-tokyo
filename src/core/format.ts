@@ -1,4 +1,5 @@
-const UNITS = ['', 'K', 'M', 'B', 'T', 'Qa', 'Qi', 'Sx', 'Sp', 'Oc', 'No', 'Dc'];
+// Past trillions, two-letter codes like "Qa" read as noise, so the big tiers are spelled out (with a no-break space).
+const UNITS = ['', 'K', 'M', 'B', 'T', '\u00a0quad', '\u00a0quint', '\u00a0sext', '\u00a0sept', '\u00a0oct', '\u00a0non', '\u00a0dec'];
 
 /** 1234 → "1,234"; 1.5e6 → "1.5M"; 2.58e7 → "25.8M"; 1.2e9 → "1.2B". */
 export function short(n: number, digits = 1): string {

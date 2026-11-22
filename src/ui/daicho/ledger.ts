@@ -1,36 +1,28 @@
 // Daichō ledger (right pane): restaurants grouped by area, worst first, patched in place every snapshot.
 // Rows are keyed by restaurant id, built once, and only changed cells/attributes are written (see put()).
-import { setPolicy } from '../../core/actions';
 import { AREAS } from '../../core/data';
-import { RestKPI, applyRule } from '../../core/empire';
+import { RestKPI } from '../../core/empire';
 import { yen } from '../../core/format';
-import { esc, run } from '../dom';
+import { esc } from '../dom';
+import { icon } from '../icons';
 import './ledger.css';
-import { BAND_MARK, Band, Ctx, Part, Snap, conceptGlyph, health, overlayBand, spark } from './shared';
+import { BAND_MARK, Band, Ctx, Part, Snap, conceptGlyph, crew, health, overlayBand, spark } from './shared';
 
-type SortKey = 'worst' | 'name' | 'profit' | 'load' | 'stock' | 'stars' | 'staff';
-type Rule = 'autoHire' | 'autoPrice';
+type SortKey = 'worst' | 'name' | 'profit' | 'load' | 'stars' | 'staff';
 const RANK: Record<Band, number> = { good: 0, watch: 1, act: 2 };
-const NO_POLICY = 'Needs a manager here, or research Operations Center';
-const RULES: { key: Rule; glyph: string; word: string }[] = [{ key: 'autoHire', glyph: '自', word: 'Auto-hire' }, { key: 'autoPrice', glyph: '価', word: 'Auto-price' }];
+const MANAGED = icon('clipboard', 16, { variant: 'seal', title: 'Managed: runs itself' });
 // Header columns. `dir` = direction of the first click (every numeric column opens on its problem end).
 const COLS: { cls: string; key?: SortKey; label: string; title: string; dir?: 1 | -1 }[] = [
-  { cls: 'lc-sel', label: '', title: '' },
   { cls: 'lc-band', key: 'worst', label: '◎', title: 'Health (worst first)', dir: 1 },
   { cls: 'lc-name', key: 'name', label: 'Restaurant', title: 'Name', dir: 1 },
   { cls: 'lc-profit', key: 'profit', label: '¥/day', title: 'Profit yesterday (today so far for new shops), 7-day trend', dir: 1 },
   { cls: 'lc-load', key: 'load', label: 'Load', title: 'Kitchen load at a busy hour (over 100% = turning guests away)', dir: -1 },
-  { cls: 'lc-stock', key: 'stock', label: 'Stock', title: 'Days of ingredients left', dir: 1 },
-  { cls: 'lc-stars', key: 'stars', label: '★', title: 'Rating', dir: 1 },
-  { cls: 'lc-staff', key: 'staff', label: 'Staff', title: 'Staff hired / slots', dir: 1 },
-  { cls: 'lc-rules', label: 'Rules', title: 'House rules: 自 auto-hire · 価 auto-price', },
+  { cls: 'lc-stars', key: 'stars', label: `${icon('star', 12)}<span class="dc-sr">Rating</span>`, title: 'Rating', dir: 1 },
+  { cls: 'lc-staff', key: 'staff', label: 'Staff', title: 'Chefs and servers hired / slots', dir: 1 },
 ];
 
 interface Item { k: RestKPI; p: number; band: Band; why: string; have: number; slots: number }
-interface Row {
-  id: string; area: string; tr: HTMLTableRowElement; cb: HTMLInputElement; tds: Record<string, HTMLTableCellElement>;
-  pol: Record<Rule, HTMLButtonElement>; last: Map<string, string>;
-}
+interface Row { id: string; area: string; tr: HTMLTableRowElement; tds: Record<string, HTMLTableCellElement>; last: Map<string, string> }
 interface Group { area: string; tb: HTMLTableSectionElement; head: HTMLTableRowElement; th: HTMLTableCellElement; last: Map<string, string>; order: string }
 
 /** Write only when the value changed since last time. */
@@ -38,18 +30,15 @@ function put(o: { last: Map<string, string> }, key: string, v: string, apply: (v
   if (o.last.get(key) !== v) { o.last.set(key, v); apply(v); }
 }
 const minus = (s: string) => s.replace('-', '−');
-const sumStaff = (k: RestKPI) => Object.values(k.staff).reduce((a, r) => [a[0] + r[0], a[1] + r[1]], [0, 0]);
 
 export class Ledger implements Part {
   readonly el = document.createElement('section');
   private readonly scroller = document.createElement('div');
   private readonly table = document.createElement('table');
   private readonly empty = document.createElement('div');
-  private readonly bulk = document.createElement('div');
   private readonly filter = document.createElement('input');
   private readonly title = document.createElement('h3');
   private readonly count = document.createElement('span');
-  private readonly allCb = document.createElement('input');
   private readonly ths: HTMLTableCellElement[] = [];
   private rows = new Map<string, Row>();
   private groups = new Map<string, Group>();
@@ -61,7 +50,6 @@ export class Ledger implements Part {
   private selfHover: string | null = null;
   private pointerIn = false;
   private force = true;
-  private bulkKey = '';
   private readonly unsub: (() => void)[] = [];
 
   constructor(private ctx: Ctx) {
@@ -76,16 +64,14 @@ export class Ledger implements Part {
     this.filter.className = 'dc-lg-filter';
     this.filter.placeholder = 'Filter  /';
     this.filter.setAttribute('aria-label', 'Filter restaurants by name or area');
+    top.insertAdjacentHTML('afterbegin', icon('book', 24, { variant: 'seal' }));
     top.append(this.title, this.count, this.filter);
 
-    this.allCb.type = 'checkbox';
-    this.allCb.setAttribute('aria-label', 'Select all visible restaurants');
     const thead = this.table.createTHead().insertRow();
     for (const c of COLS) {
       const th = document.createElement('th');
       th.className = c.cls; th.scope = 'col';
-      if (c.cls === 'lc-sel') th.append(this.allCb);
-      else if (c.key) th.innerHTML = `<button type="button" class="dc-lg-sort" data-sort="${c.key}" title="${esc(c.title)}">${c.label}${c.key === 'worst' ? '<span class="dc-sr">Health</span>' : ''}</button>`;
+      if (c.key) th.innerHTML = `<button type="button" class="dc-lg-sort" data-sort="${c.key}" title="${esc(c.title)}">${c.label}${c.key === 'worst' ? '<span class="dc-sr">Health</span>' : ''}</button>`;
       else { th.textContent = c.label; th.title = c.title; }
       thead.append(th); this.ths.push(th);
     }
@@ -98,17 +84,9 @@ export class Ledger implements Part {
     this.empty.hidden = true;
     this.empty.innerHTML = '<b>白紙 — a blank ledger</b><p>No restaurants yet. Pick a lot on the map and open your first shop; every one you own gets a line here.</p>';
 
-    this.bulk.className = 'dc-lg-bulk';
-    this.bulk.hidden = true;
-    this.bulk.innerHTML = `<span class="n" aria-live="polite"></span><span class="lbl">Make it a rule:</span>
-      ${RULES.map((r) => `<button type="button" class="btn small blue" data-rule="${r.key}">${r.glyph} ${r.word}</button>`).join('')}
-      <button type="button" class="btn small ghost" data-clear>Clear</button>`;
-
-    el.append(top, this.scroller, this.empty, this.bulk);
+    el.append(top, this.scroller, this.empty);
 
     this.table.addEventListener('click', this.onClick);
-    this.table.addEventListener('change', this.onChange);
-    this.bulk.addEventListener('click', this.onBulk);
     el.addEventListener('keydown', this.onKey);
     this.filter.addEventListener('input', () => { this.force = true; this.render(this.ctx.snap()); });
     this.scroller.addEventListener('pointerenter', () => { this.pointerIn = true; });
@@ -125,27 +103,26 @@ export class Ledger implements Part {
     const { store } = ctx;
     this.unsub.push(
       store.on(['area'], () => { this.force = true; this.scroller.scrollTop = 0; this.render(ctx.snap()); }),
-      store.on(['selected'], () => this.render(ctx.snap())),
       store.on(['hover'], () => this.onHover()),
     );
   }
 
   // ------------------------------------------------------------------ render (patch)
   render(snap: Snap): void {
-    const { store } = this.ctx, area = store.st.area, sel = store.st.selected;
+    const area = this.ctx.store.st.area;
     const none = snap.kpis.length === 0;
     if (this.empty.hidden !== !none) { this.empty.hidden = !none; this.scroller.hidden = none; this.filter.hidden = none; }
 
     // rows: drop sold, build new, patch cells
     const live = new Set(snap.kpis.map((k) => k.id));
-    for (const [id, r] of this.rows) if (!live.has(id)) { r.tr.remove(); this.rows.delete(id); sel.delete(id); }
+    for (const [id, r] of this.rows) if (!live.has(id)) { r.tr.remove(); this.rows.delete(id); }
     const q = this.filter.value.trim().toLowerCase();
     const items: Item[] = [];
     for (const k of snap.kpis) {
-      const h = health(k), [have, slots] = sumStaff(k);
+      const h = health(k), [have, slots] = crew(k);
       const it: Item = { k, p: k.profitYesterday ?? k.revToday, band: h.band, why: h.why, have, slots };
       const r = this.rows.get(k.id) ?? this.makeRow(k);
-      this.patchRow(r, it, sel.has(k.id));
+      this.patchRow(r, it);
       const a = AREAS[k.area];
       const show = (!area || k.area === area) && (!q || `${k.name} ${k.areaName} ${a?.jp ?? ''}`.toLowerCase().includes(q));
       if (r.tr.hidden === show) r.tr.hidden = !show;
@@ -155,7 +132,7 @@ export class Ledger implements Part {
     // sort, group (groups ordered by their first = worst member), reorder only on change
     const { key, dir } = this.sort;
     const num: Partial<Record<SortKey, (i: Item) => number>> = {
-      profit: (i) => i.p, load: (i) => i.k.load, stock: (i) => i.k.stockDays, stars: (i) => i.k.stars, staff: (i) => (i.slots ? i.have / i.slots : 1),
+      profit: (i) => i.p, load: (i) => i.k.load, stars: (i) => i.k.stars, staff: (i) => (i.slots ? i.have / i.slots : 1),
     };
     items.sort((a, b) => key === 'worst' ? dir * (RANK[b.band] - RANK[a.band] || a.p - b.p) || a.k.name.localeCompare(b.k.name)
       : key === 'name' ? dir * a.k.name.localeCompare(b.k.name)
@@ -193,7 +170,7 @@ export class Ledger implements Part {
     }
     this.force = false;
 
-    // header: title, count, sort state, select-all
+    // header: title, count, sort state
     const t = area ? `${AREAS[area]?.jp ?? ''} ${AREAS[area]?.name ?? area}` : '台帳 Ledger';
     if (this.title.textContent !== t) this.title.textContent = t;
     const c = none ? '' : `${items.length}${items.length !== snap.kpis.length && !area ? ` of ${snap.kpis.length}` : ''} shop${items.length === 1 ? '' : 's'}`;
@@ -206,13 +183,6 @@ export class Ledger implements Part {
     });
     const cap = `Restaurants, sorted by ${COLS.find((x) => x.key === key)!.title.toLowerCase()}`;
     if (this.table.caption!.textContent !== cap) this.table.caption!.textContent = cap;
-    const nSel = items.filter((i) => sel.has(i.k.id)).length;
-    const all = items.length > 0 && nSel === items.length, some = nSel > 0 && !all;
-    if (this.allCb.checked !== all) this.allCb.checked = all;
-    if (this.allCb.indeterminate !== some) this.allCb.indeterminate = some;
-    this.allCb.disabled = items.length === 0;
-
-    this.patchBulk(snap);
     this.roving();
   }
 
@@ -221,29 +191,26 @@ export class Ledger implements Part {
     tr.className = 'dc-lg-row';
     tr.dataset.id = k.id;
     tr.tabIndex = -1;
-    tr.innerHTML = `<td class="lc-sel"><input type="checkbox" tabindex="-1"></td><td class="lc-band"></td>
+    tr.innerHTML = `<td class="lc-band"></td>
       <td class="lc-name"><button type="button" class="dc-lg-name" tabindex="-1" data-open></button></td>
       <td class="lc-profit"><span class="v"></span><span class="s"></span></td>
       <td class="lc-load"><span class="dc-lg-load"><i></i></span><span class="t"></span></td>
-      <td class="lc-stock"></td><td class="lc-stars"></td><td class="lc-staff"></td>
-      <td class="lc-rules">${RULES.map((r) => `<button type="button" class="dc-lg-pol" tabindex="-1" data-pol="${r.key}" aria-label="${r.word}">${r.glyph}</button>`).join('')}</td>`;
+      <td class="lc-stars"></td><td class="lc-staff"></td>`;
     const tds = Object.fromEntries([...tr.cells].map((td) => [td.className, td]));
-    const pol = Object.fromEntries(RULES.map((r) => [r.key, tr.querySelector<HTMLButtonElement>(`[data-pol="${r.key}"]`)!])) as Record<Rule, HTMLButtonElement>;
-    const r: Row = { id: k.id, area: k.area, tr, cb: tr.querySelector('input')!, tds, pol, last: new Map() };
+    const r: Row = { id: k.id, area: k.area, tr, tds, last: new Map() };
     this.rows.set(k.id, r);
     (this.groups.get(k.area) ?? this.makeGroup(k.area)).tb.append(tr);
     return r;
   }
 
-  private patchRow(r: Row, it: Item, selected: boolean): void {
+  private patchRow(r: Row, it: Item): void {
     const { k } = it, td = r.tds;
-    put(r, 'name', `${k.concept}|${k.name}`, () => {
+    put(r, 'name', `${k.concept}|${k.name}|${k.managed}`, () => {
       // the area is already named by the group header / title, so drop it from the row ("Soho Grand Hall" → "Grand Hall")
       const pre = [k.areaName, k.areaName.split(' · ').pop()!].find((a) => k.name.startsWith(`${a} `));
       const nm = pre ? k.name.slice(pre.length + 1) : k.name;
-      td['lc-name'].firstElementChild!.innerHTML = `${conceptGlyph(k.concept, 13)}<span class="t">${esc(nm)}</span>`;
-      td['lc-name'].firstElementChild!.setAttribute('title', `Open ${k.name}`);
-      r.cb.setAttribute('aria-label', `Select ${k.name}`);
+      td['lc-name'].firstElementChild!.innerHTML = `${conceptGlyph(k.concept, 13)}<span class="t">${esc(nm)}</span>${k.managed ? MANAGED : ''}`;
+      td['lc-name'].firstElementChild!.setAttribute('title', `Open ${k.name}${k.managed ? ' (managed: runs itself)' : ''}`);
     });
     put(r, 'band', `${it.band}|${it.why}`, () => {
       const m = BAND_MARK[it.band];
@@ -267,24 +234,12 @@ export class Ledger implements Part {
       td['lc-load'].lastElementChild!.textContent = lb.label;
       td['lc-load'].title = k.load > 1 ? `Load ${lb.label}: turning guests away` : `Load ${lb.label}`;
     });
-    const sb = overlayBand(k, 'stock');
-    put(r, 'stock', `${sb.label}|${sb.band}`, () => { td['lc-stock'].textContent = sb.label; td['lc-stock'].className = `lc-stock ${sb.band}`; });
     put(r, 'stars', k.stars.toFixed(1), (v) => { td['lc-stars'].textContent = v; });
     put(r, 'staff', `${it.have}/${it.slots}|${k.staff.chef[0]}`, () => {
       td['lc-staff'].textContent = `${it.have}/${it.slots}`;
       td['lc-staff'].classList.toggle('act', k.staff.chef[0] === 0);
       td['lc-staff'].title = Object.entries(k.staff).map(([role, [h, s]]) => `${role} ${h}/${s}`).join(' · ');
     });
-    for (const rule of RULES) {
-      const on = k.policy[rule.key];
-      put(r, rule.key, `${on}|${k.policiesAvailable}`, () => {
-        const b = r.pol[rule.key];
-        b.setAttribute('aria-pressed', String(on));
-        b.disabled = !on && !k.policiesAvailable;
-        b.title = `${rule.word}: ${on ? 'on — click to turn off' : k.policiesAvailable ? 'off — click to turn on' : `off. ${NO_POLICY}`}`;
-      });
-    }
-    put(r, 'sel', String(selected), () => { r.cb.checked = selected; r.tr.classList.toggle('is-sel', selected); });
   }
 
   private makeGroup(area: string): Group {
@@ -312,24 +267,6 @@ export class Ledger implements Part {
         <span class="jp">${esc(a?.jp ?? '')}</span><span class="nm">${esc(a?.name ?? g.area)}</span>
         <span class="n">${its.length} shop${its.length === 1 ? '' : 's'}</span><span class="sum${sum < 0 ? ' neg' : ''}">${minus(yen(sum))}/day</span></div>`;
     });
-  }
-
-  private patchBulk(snap: Snap): void {
-    const ids = [...this.ctx.store.st.selected];
-    const show = ids.length > 0;
-    if (this.bulk.hidden === show) this.bulk.hidden = !show;
-    if (!show) return;
-    const can = ids.some((id) => snap.byId.get(id)?.policiesAvailable);
-    if (this.bulkKey === `${ids.length}|${can}`) return;
-    this.bulkKey = `${ids.length}|${can}`;
-    {
-      this.bulk.querySelector('.n')!.textContent = `${ids.length} selected`;
-      this.bulk.querySelector('.lbl')!.textContent = can ? 'Make it a rule:' : 'Rules need a manager:';
-      for (const b of this.bulk.querySelectorAll<HTMLButtonElement>('[data-rule]')) {
-        b.disabled = !can;
-        b.title = can ? `Turn on for every selected restaurant that can use house rules` : `None selected can use house rules. ${NO_POLICY}`;
-      }
-    }
   }
 
   /** One row in the tab order: the active one (or the first visible). */
@@ -385,43 +322,19 @@ export class Ledger implements Part {
     }
     const r = this.rowOf(t);
     if (!r) return;
-    const pol = t.closest<HTMLButtonElement>('[data-pol]');
-    if (pol) {
-      const key = pol.dataset.pol as Rule;
-      if (run(pol, setPolicy(this.ctx.host.s, r.id, key, pol.getAttribute('aria-pressed') !== 'true'), 'click')) this.ctx.refresh();
-    } else if (t.closest('[data-open]')) this.ctx.opts.openRestaurant(r.id);
-  };
-
-  private readonly onChange = (e: Event) => {
-    const t = e.target as HTMLInputElement, { store } = this.ctx, sel = store.st.selected;
-    if (t === this.allCb) {
-      for (const r of this.visible) if (t.checked) sel.add(r.id); else sel.delete(r.id);
-    } else {
-      const r = this.rowOf(t);
-      if (!r) return;
-      if (t.checked) sel.add(r.id); else sel.delete(r.id);
-    }
-    store.touchSelected();
-  };
-
-  private readonly onBulk = (e: MouseEvent) => {
-    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('button');
-    if (!b) return;
-    const { store } = this.ctx;
-    if (b.dataset.clear !== undefined) { store.st.selected.clear(); store.touchSelected(); return; }
-    if (run(b, applyRule(this.ctx.host.s, b.dataset.rule as Rule, [...store.st.selected]))) this.ctx.refresh();
+    if (t.closest('[data-open]')) this.ctx.opts.openRestaurant(r.id);
   };
 
   private readonly onKey = (e: KeyboardEvent) => {
     const t = e.target as HTMLElement;
-    const typing = t instanceof HTMLInputElement && t.type !== 'checkbox';
+    const typing = t instanceof HTMLInputElement;
     if (e.key === '/' && !typing) { e.preventDefault(); this.filter.focus(); this.filter.select(); return; }
     if (typing) { if (e.key === 'ArrowDown' && this.visible[0]) { e.preventDefault(); this.visible[0].tr.focus(); } return; }
     const r = this.rowOf(t);
     if (!r) return;
     const i = this.visible.indexOf(r);
     const go = (j: number) => { const n = this.visible[Math.max(0, Math.min(this.visible.length - 1, j))]; if (n) { n.tr.focus(); this.reveal(n.tr); } };
-    const ctrls = [r.tr, ...r.tr.querySelectorAll<HTMLElement>('input, button')].filter((c) => c === r.tr || (c.offsetParent !== null && !(c as HTMLButtonElement).disabled));
+    const ctrls = [r.tr, ...r.tr.querySelectorAll<HTMLElement>('button')].filter((c) => c === r.tr || c.offsetParent !== null);
     const ci = ctrls.indexOf(t);
     switch (e.key) {
       case 'ArrowDown': go(i + 1); break;
@@ -430,7 +343,6 @@ export class Ledger implements Part {
       case 'End': go(this.visible.length - 1); break;
       case 'ArrowRight': ctrls[Math.min(ctrls.length - 1, ci + 1)]?.focus(); break;
       case 'ArrowLeft': ctrls[Math.max(0, ci - 1)]?.focus(); break;
-      case ' ': if (t !== r.tr) return; r.cb.click(); break;
       case 'Enter': if (t !== r.tr) return; this.ctx.opts.openRestaurant(r.id); break;
       default: return;
     }

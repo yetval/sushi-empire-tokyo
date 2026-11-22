@@ -64,11 +64,11 @@ const VOICES: Record<CustomerType, Voice> = {
   },
   influencer: {
     open: [
-      ['Unfollowing this restaurant IRL 💀', 'The lighting was SO bad my ring light gave up 😤', 'Not sponsored and now I know why 🙃'],
-      ["It's giving... okay 🤷", 'Cute plates, mid lighting 📸', 'Vibes were a solid 6/10 ngl ✨'],
-      ['OMG obsessed 😍✨ THE spot rn!!', "Literally crying it's so aesthetic 😭💕", 'Content AND flavor?? iconic 🔥🔥'],
+      ['Unfollowing this restaurant IRL', 'The lighting was SO bad my ring light gave up', 'Not sponsored and now I know why'],
+      ["It's giving... okay", 'Cute plates, mid lighting', 'Vibes were a solid 6/10 ngl'],
+      ['OMG obsessed!! THE spot rn!!', "Literally crying it's so aesthetic", 'Content AND flavor?? iconic'],
     ],
-    sign: ['{tag} #sushitime #tokyoeats', 'Link in bio 💅 {tag}', '#foodie #notanad {tag}'],
+    sign: ['{tag} #sushitime #tokyoeats', 'Link in bio {tag}', '#foodie #notanad {tag}'],
     handle: ['sushi.queen', 'BentoBabe', 'Riko_vlogs'],
   },
   critic: {
@@ -103,8 +103,6 @@ const DETAIL = {
   fast: ['Food landed in record time!', 'Served faster than a bullet train.', 'Blinked and my order was there.', 'Speedy kitchen at {place}.'],
   pricey: ['Prices made my wallet cry.', "Pretty sure I paid for the chef's car.", 'Bring a second credit card to {place}.', 'Did they price this in dollars by mistake?'],
   bargain: ['Cheap enough to come back tomorrow.', 'Absolute steal for the price.', 'Prices from a kinder century.', 'My wallet sends its thanks to {place}.'],
-  dirty: ['The floor was sticky in a personal way.', 'Saw a napkin from last week. Hi, napkin.', '{place} could use a mop and a pep talk.', 'Table had a souvenir from the last guest.'],
-  clean: ["So clean I could eat off the floor (didn't).", 'Spotless counters, very relaxing.', '{place} gleamed like a showroom.', 'Cleaner than my apartment, honestly.'],
   generic: ['Nice little spot, {place}.', '{place} has charm.', 'Found {place} by accident.', '{place}: worth a look.'],
 };
 
@@ -135,8 +133,6 @@ export function makeReview(
   else if (sale.waitSec < def.patience * 0.25) details.push('fast');
   if (r.priceMult > def.priceTolerance + 0.15) details.push('pricey');
   else if (r.priceMult < def.priceTolerance - 0.4) details.push('bargain');
-  if (r.cleanliness < 0.5) details.push('dirty');
-  else if (r.cleanliness > 0.9) details.push('clean');
   if (!details.length) details.push('generic');
   const first = pick(details), second = pick(details);
 

@@ -11,9 +11,8 @@ export class Player {
   vel = new THREE.Vector3();
   yaw = 0;
   grounded = true;
-  locked = false; // e.g. while cooking
+  locked = false;
   override: 'cook' | 'interact' | 'cheer' | null = null;
-  carrying = false;
   stepDist = 0;
   private lastGood: [number, number] | null = null;
   onStep: () => void = () => {};
@@ -70,7 +69,7 @@ export class Player {
     this.char.root.position.copy(this.pos);
     this.char.root.rotation.y = this.yaw;
     this.char.speed = sp;
-    this.char.anim = this.override ?? (!this.grounded ? 'jump' : this.carrying ? 'carry' : sp > 5 ? 'run' : sp > 0.2 ? 'walk' : 'idle');
+    this.char.anim = this.override ?? (!this.grounded ? 'jump' : sp > 5 ? 'run' : sp > 0.2 ? 'walk' : 'idle');
     this.char.update(dt);
   }
 

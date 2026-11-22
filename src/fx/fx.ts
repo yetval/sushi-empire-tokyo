@@ -146,9 +146,10 @@ class MeshPool {
   }
 }
 
-const WHITE = new THREE.Color('#ffffff'), GREY = new THREE.Color('#b9b4ad'), DUST = new THREE.Color('#cdbb9c');
-const CONFETTI = ['#e63946', '#ffd23f', '#2ec4b6', '#ff8fab', '#4d96ff', '#7bed9f', '#ff9f43'].map((c) => new THREE.Color(c));
-const SPARK = ['#ffd23f', '#fff3b0', '#7bdff2', '#ff8fab'].map((c) => new THREE.Color(c));
+// Palette matches world/materials.ts: paper whites, brand vermilion, muted gold, drafting teal, pale pastels.
+const WHITE = new THREE.Color('#f4f3ef'), GREY = new THREE.Color('#b4b3b0'), DUST = new THREE.Color('#d2cec6');
+const CONFETTI = ['#b82d25', '#f3f1ec', '#d9ae4f', '#3f97a3', '#a9c6dc', '#e4b9ae', '#a3b796'].map((c) => new THREE.Color(c));
+const SPARK = ['#ffe2a6', '#fff7e8', '#a8ecf6'].map((c) => new THREE.Color(c));
 const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 const pick = <T>(a: T[]) => a[Math.floor(Math.random() * a.length)];
 
@@ -169,10 +170,10 @@ export class Fx {
   constructor(scene: THREE.Scene, private camera: THREE.Camera) {
     const coinGeo = new THREE.CylinderGeometry(0.085, 0.085, 0.022, 18);
     coinGeo.rotateX(Math.PI / 2);
-    const coinMat = new THREE.MeshStandardMaterial({ color: '#ffd23f', metalness: 0.6, roughness: 0.3, emissive: '#b07800', emissiveIntensity: 0.9 });
+    const coinMat = new THREE.MeshStandardMaterial({ color: '#e2b54c', metalness: 0.45, roughness: 0.32, emissive: '#7a5410', emissiveIntensity: 0.55 });
     this.coins = new MeshPool(120, coinGeo, coinMat, true, 11, 0.2);
     const confGeo = new THREE.PlaneGeometry(0.09, 0.055);
-    const confMat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+    const confMat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.75 }); // lit paper, not flat stickers
     this.confetti = new MeshPool(360, confGeo, confMat, false, 3.2, 2.4);
     for (let i = 0; i < 360; i++) this.confetti.mesh.setColorAt(i, WHITE);
     this.group.add(this.glow.points, this.smoke.points, this.coins.mesh, this.confetti.mesh);

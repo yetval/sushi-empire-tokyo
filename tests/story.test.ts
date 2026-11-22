@@ -15,12 +15,8 @@ const variety: [string, GameState][] = [
   ['fresh', createNewState()],
   ['night', at(0, (s) => { s.minute = 23 * 60; })],
   ['early morning', at(300, (s) => { s.minute = 6 * 60; })],
-  ['festival', at(800, (s) => { s.event = { id: 'festival', endsDay: 2 }; })],
-  ['critic', at(3000, (s) => { s.event = { id: 'critic', endsDay: 2 }; })],
-  ['shortage', at(1500, (s) => { s.event = { id: 'shortage_tuna', endsDay: 2 }; })],
-  ['rain', at(50, (s) => { s.event = { id: 'rain', endsDay: 2 }; })],
-  ['buyout', at(20_000, (s) => { delete s.rivals.kaiten.asakusa; s.districts.push('shibuya'); })],
-  ['all buyouts', at(5e6, (s) => { s.rivals = { kaiten: {}, maguro: {}, golden: {} }; })],
+  ['staffed', at(800, (s) => { s.staff.push({ id: 1, name: 'A', role: 'chef', skill: 1, xp: 0, wage: 900, restaurant: 'asakusa_stand', look: s.player.avatar }); })],
+  ['shibuya', at(20_000, (s) => { s.districts.push('shibuya'); })],
   ['chapter2', at(1_000_000, (s) => { s.flags.chapter2 = true; s.cities.tokyo = { open: true, franchises: 0 }; })],
   ['late game', at(2e8, (s) => { s.flags.chapter2 = true; s.districts = ['asakusa', 'shibuya', 'shinjuku', 'ginza']; s.cities = { tokyo: { open: true, franchises: 5 }, osaka: { open: true, franchises: 2 } }; })],
 ];
@@ -35,8 +31,10 @@ describe('dialogueFor', () => {
   });
 
   it('reacts to progress', () => {
-    expect(dialogueFor('ryo', variety[7][1]).join(' ')).toContain('Asakusa');
-    expect(dialogueFor('kenji', variety[0][1])).not.toEqual(dialogueFor('kenji', variety[9][1]));
+    expect(dialogueFor('kenji', variety[0][1]).join(' ')).toContain('Hire a chef');
+    expect(dialogueFor('kenji', variety[3][1])).not.toEqual(dialogueFor('kenji', variety[0][1]));
+    expect(dialogueFor('ryo', variety[4][1]).join(' ')).toContain('Shibuya');
+    expect(dialogueFor('kenji', variety[0][1])).not.toEqual(dialogueFor('kenji', variety[5][1]));
   });
 });
 
@@ -50,19 +48,18 @@ describe('checkStoryBeat', () => {
     const seen: string[] = [];
     const drain = () => { for (let b = checkStoryBeat(s); b; b = checkStoryBeat(s)) seen.push(b.id); };
     const steps: ((s: GameState) => void)[] = [
-      (s) => { s.lifetime.pieces = 600; s.flags.boughtOnce = true; },
+      (s) => { s.lifetime.pieces = 600; },
       (s) => { s.lifetime.pieces = 1_200; },
-      (s) => { s.event = { id: 'critic', endsDay: 9 }; },
-      (s) => { s.event = null; s.restaurants.x = { ...s.restaurants.asakusa_stand, id: 'x' }; s.lifetime.pieces = 6_000; },
-      (s) => { delete s.rivals.kaiten.asakusa; },
-      (s) => { s.districts.push('ginza'); s.rivals.kaiten = {}; },
+      (s) => { s.lifetime.pieces = 2_500; },
+      (s) => { s.restaurants.x = { ...s.restaurants.asakusa_stand, id: 'x' }; s.lifetime.pieces = 6_000; },
+      (s) => { s.districts.push('ginza'); },
       (s) => { s.lifetime.pieces = 1_000_000; s.flags.chapter2 = true; },
       (s) => { s.cities = { tokyo: { open: true, franchises: 0 }, osaka: { open: true, franchises: 0 } }; },
       (s) => { s.lifetime.pieces = 20_000_000; },
     ];
     for (const step of steps) { step(s); drain(); drain(); }
     expect(new Set(seen).size).toBe(seen.length);
-    expect(seen.length).toBeGreaterThanOrEqual(10);
+    expect(seen.length).toBeGreaterThanOrEqual(9);
     for (const id of seen) expect(s.flags['story_' + id]).toBe(true);
   });
 
@@ -71,6 +68,7 @@ describe('checkStoryBeat', () => {
     const b = checkStoryBeat(s);
     expect(b?.id).toBe('ryo_rival');
     expect(b?.speaker).toBe('Ryo Tanaka');
+    expect(checkStoryBeat(s)?.id).toBe('mika_regular');
     expect(checkStoryBeat(s)).toBeNull();
   });
 });

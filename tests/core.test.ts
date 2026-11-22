@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import * as A from '../src/core/actions';
-import { DAY_SECONDS, FIXED_MILESTONE_COUNT, INGREDIENT_IDS, PROPERTIES, milestone } from '../src/core/data';
+import { DAY_SECONDS, FIXED_MILESTONE_COUNT, PROPERTIES, RECIPES, milestone, recipeCost } from '../src/core/data';
 import { exact, short } from '../src/core/format';
 import * as sim from '../src/core/sim';
 import {
@@ -16,8 +16,7 @@ class MemStorage { m = new Map<string, string>(); getItem(k: string) { return th
 let s: GameState;
 beforeEach(() => { sim.setRandom(seeded()); s = createNewState(); sim.refreshCandidates(s); });
 
-const totalInv = (st: GameState) => INGREDIENT_IDS.reduce((a, k) => a + st.inventory[k], 0);
-function hire(st: GameState, role: 'chef' | 'server' | 'cleaner' | 'manager', rest: string) {
+function hire(st: GameState, role: 'chef' | 'server' | 'manager', rest: string) {
   const c = sim.makeCandidate(st, role); st.candidates.push(c); st.cash += 1e9;
   const p = st.lifetime.pieces; st.lifetime.pieces = Math.max(p, 1e5); // bypass unlock thresholds
   expect(A.hire(st, c.id, rest)).toBeNull();
@@ -30,7 +29,7 @@ describe('format', () => {
     expect(short(1_500_000)).toBe('1.5M');
     expect(short(25_800_000)).toBe('25.8M');
     expect(short(1_200_000_000)).toBe('1.2B');
-    expect(short(3e15)).toBe('3Qa');
+    expect(short(3e15)).toBe('3\u00a0quad');
     expect(exact(1_234_567_890_123)).toBe('1,234,567,890,123');
   });
 });
@@ -77,58 +76,70 @@ describe('milestones', () => {
   });
 });
 
-describe('orders & inventory', () => {
-  it('rejects orders without stock and never goes negative', () => {
-    expect(sim.acceptOrder(s, 'asakusa_stand', { recipe: 'tuna_nigiri', pieces: 2, type: 'office', customerId: 1 })).toBe('nostock');
-    s.inventory.salmon = 3;
+/** Test shortcut: the kitchen finishes this ticket now. */
+function cook(st: GameState, restId: string, id: number): void {
+  const r = st.restaurants[restId], i = r.orders.findIndex((t) => t.id === id);
+  r.ready.push(...r.orders.splice(i, 1).map((t) => ({ ...t, started: true, progress: t.pieces, quality: 0.6 })));
+}
+
+describe('orders & ingredients', () => {
+  it('a sale pays its ingredients at market price, once', () => {
     const t = sim.acceptOrder(s, 'asakusa_stand', { recipe: 'salmon_nigiri', pieces: 2, type: 'office', customerId: 1 });
-    expect(t).not.toBe('nostock');
-    expect(s.inventory.salmon).toBe(3); // consumed only when cooking starts
-    expect(sim.finishManual(s, 'asakusa_stand', (t as any).id, 1)).toBe(true);
-    expect(s.inventory.salmon).toBe(1);
-    expect(s.inventory.rice).toBe(28);
+    cook(s, 'asakusa_stand', t.id);
     const cash = s.cash;
-    const res = sim.settle(s, 'asakusa_stand', (t as any).id, 5)!;
+    const res = sim.settle(s, 'asakusa_stand', t.id, 5)!;
     expect(res.paid).toBe(240);
-    expect(s.cash).toBeCloseTo(cash + res.paid + res.tip);
+    const ingredients = recipeCost(RECIPES.salmon_nigiri, sim.mods(s).ingredientCost) * 2;
+    expect(ingredients).toBeGreaterThan(0);
+    expect(s.cash).toBeCloseTo(cash + res.paid + res.tip - ingredients);
+    expect(s.restaurants.asakusa_stand.day.cost).toBeCloseTo(ingredients);
     expect(s.lifetime.pieces).toBe(2);
-    expect(sim.settle(s, 'asakusa_stand', (t as any).id, 5)).toBeNull(); // cannot double-settle
+    expect(sim.settle(s, 'asakusa_stand', t.id, 5)).toBeNull(); // cannot double-settle
   });
 
-  it('buying ingredients respects cash and storage', () => {
-    s.cash = 100;
-    const got = sim.buyIngredient(s, 'salmon', 50);
-    expect(got).toBe(2);
-    expect(s.cash).toBeGreaterThanOrEqual(0);
-    s.cash = 1e9;
-    sim.buyIngredient(s, 'rice', 1e6);
-    expect(sim.storageUsed(s)).toBe(sim.mods(s).storage);
+  it('no chef, no sales: nobody walks in and nothing sells off-screen', () => {
+    expect(sim.isAutomated(s, 'asakusa_stand')).toBe(false);
+    expect(sim.visibleSpawnPerMin(s, 'asakusa_stand')).toBe(0);
+    for (let i = 0; i < 3000; i++) sim.tick(s, 0.1, { activeDistrict: null });
+    expect(s.lifetime.pieces).toBe(0);
   });
 
-  it('stress: random automated play never makes inventory negative or loses accounting', () => {
+  it('a lone chef sells but works the counter too; a server frees the kitchen', () => {
+    hire(s, 'chef', 'asakusa_stand');
+    expect(sim.isAutomated(s, 'asakusa_stand')).toBe(true);
+    expect(sim.understaffed(s, 'asakusa_stand')).toBe(true);
+    const slow = sim.kitchenRate(s, 'asakusa_stand');
+    for (let i = 0; i < 1200; i++) sim.tick(s, 0.1, { activeDistrict: null });
+    expect(s.lifetime.pieces).toBeGreaterThan(0);
+    hire(s, 'server', 'asakusa_stand');
+    expect(sim.understaffed(s, 'asakusa_stand')).toBe(false);
+    expect(sim.kitchenRate(s, 'asakusa_stand')).toBeCloseTo(slow / sim.UNDERSTAFFED_RATE);
+  });
+
+  it('stress: random automated play keeps the accounting finite', () => {
     hire(s, 'chef', 'asakusa_stand'); hire(s, 'server', 'asakusa_stand');
     s.cash = 50_000;
+    const net0 = s.lifetime.revenue - s.lifetime.expenses;
     for (let i = 0; i < 20_000; i++) {
-      if (i % 500 === 0) for (const k of ['rice', 'nori', 'cucumber', 'salmon'] as const) sim.buyIngredient(s, k, 40);
       if (i % 3000 === 1500) sim.releaseVisibleTickets(s, 'asakusa');
       sim.tick(s, 0.1, { activeDistrict: null });
-      for (const k of INGREDIENT_IDS) expect(s.inventory[k]).toBeGreaterThanOrEqual(0);
     }
     expect(s.lifetime.pieces).toBeGreaterThan(100);
     expect(Number.isFinite(s.cash)).toBe(true);
+    expect(s.lifetime.revenue - s.lifetime.expenses - net0).toBeCloseTo(s.cash - 50_000, 3); // every yen is booked
   }, 60_000);
 
-  it('releasing visible tickets conserves ingredients and creates no sales', () => {
-    s.inventory.salmon = 10;
-    const t = sim.acceptOrder(s, 'asakusa_stand', { recipe: 'salmon_nigiri', pieces: 3, type: 'tourist', customerId: 7 }) as any;
-    sim.acceptOrder(s, 'asakusa_stand', { recipe: 'salmon_nigiri', pieces: 2, type: 'tourist', customerId: 8 });
-    sim.finishManual(s, 'asakusa_stand', t.id, 0.8); // consumes 3
-    const before = totalInv(s), pieces = s.lifetime.pieces, cash = s.cash;
-    sim.releaseVisibleTickets(s, null); // not automated → refunds the cooked one, drops the uncooked one
-    expect(totalInv(s)).toBe(before + 3 * 2); // salmon+rice for 3 pieces
+  it('releasing visible tickets: without a chef they are dropped, with one they go to takeout; no sales either way', () => {
+    sim.acceptOrder(s, 'asakusa_stand', { recipe: 'salmon_nigiri', pieces: 3, type: 'tourist', customerId: 7 });
+    sim.releaseVisibleTickets(s, null);
+    expect(s.restaurants.asakusa_stand.orders.length).toBe(0);
+    hire(s, 'chef', 'asakusa_stand');
+    const pieces = s.lifetime.pieces, cash = s.cash;
+    sim.acceptOrder(s, 'asakusa_stand', { recipe: 'salmon_nigiri', pieces: 3, type: 'tourist', customerId: 8 });
+    sim.releaseVisibleTickets(s, null);
+    expect(s.restaurants.asakusa_stand.orders.map((t) => t.customerId)).toEqual([null]);
     expect(s.lifetime.pieces).toBe(pieces);
     expect(s.cash).toBe(cash);
-    expect(s.restaurants.asakusa_stand.orders.length + s.restaurants.asakusa_stand.ready.length).toBe(0);
   });
 });
 
@@ -142,6 +153,18 @@ describe('economy', () => {
     expect(sim.demandPerMin(s, 'asakusa_stand', 12 * 60)).toBeGreaterThan(d0);
     s.cash = 0;
     expect(A.buyUpgrade(s, 'asakusa_stand', 'sign')).toMatch(/Need/);
+  });
+
+  it('one-off purchases count as invested, not operating expenses', () => {
+    s.cash = 100_000;
+    const price = A.upgradePrice(s, 'asakusa_stand', 'sign'), spent = s.lifetime.expenses;
+    expect(A.buyUpgrade(s, 'asakusa_stand', 'sign')).toBeNull();
+    expect(s.today.invested).toBe(price);
+    expect(s.today.expenses).toBe(0);
+    expect(s.lifetime.expenses).toBe(spent + price); // lifetime keeps every yen out
+    sim.endDay(s);
+    expect(s.history.at(-1)!.invested).toBe(price);
+    expect(s.today.invested).toBe(0);
   });
 
   it('higher prices reduce demand but raise the bill', () => {
@@ -166,11 +189,6 @@ describe('economy', () => {
     const d = s.day;
     for (let i = 0; i < DAY_SECONDS * 10; i++) sim.tick(s, 0.1, { activeDistrict: 'asakusa' });
     expect(s.day).toBeGreaterThan(d);
-  });
-
-  it('a non-automated restaurant earns nothing off-screen', () => {
-    for (let i = 0; i < 3000; i++) sim.tick(s, 0.1, { activeDistrict: null });
-    expect(s.lifetime.pieces).toBe(0);
   });
 
   it('franchises sell pieces and pay royalties after chapter 2', () => {
@@ -248,35 +266,5 @@ describe('economy review regressions', () => {
     expect(r.pieces).toBeGreaterThan(0);
     expect(s.today.pieces).toBe(0);
     expect(s.lifetime.pieces).toBe(r.pieces);
-  });
-  it('out-of-season items can always be removed from the menu', () => {
-    const r = s.restaurants.asakusa_stand;
-    r.menu = ['sakura_ebi_nigiri', 'salmon_nigiri'];
-    s.day = 10; // summer: sakura recipe is out of season
-    expect(A.toggleMenu(s, 'asakusa_stand', 'sakura_ebi_nigiri')).toBeNull();
-    expect(A.toggleMenu(s, 'asakusa_stand', 'salmon_nigiri')).toMatch(/at least one/);
-    expect(A.toggleMenu(s, 'asakusa_stand', 'sakura_ebi_nigiri')).toMatch(/not unlocked/);
-  });
-});
-describe('menu always keeps a permanent recipe', () => {
-  it('cannot reduce a menu to seasonal-only items', () => {
-    const r = s.restaurants.asakusa_stand;
-    s.day = 3; // spring
-    r.menu = ['salmon_nigiri'];
-    expect(A.toggleMenu(s, 'asakusa_stand', 'sakura_ebi_nigiri')).toBeNull();
-    expect(A.toggleMenu(s, 'asakusa_stand', 'salmon_nigiri')).toMatch(/at least one/);
-  });
-});
-describe('auto-restock with a manager', () => {
-  it('restocks menu ingredients without any research, and respects a player switching one off', () => {
-    hire(s, 'chef', 'asakusa_stand'); hire(s, 'manager', 'asakusa_stand');
-    s.cash = 1e6;
-    for (const k of INGREDIENT_IDS) s.inventory[k] = 0;
-    for (let i = 0; i < 30; i++) sim.tick(s, 0.1, { activeDistrict: null });
-    expect(s.inventory.rice).toBeGreaterThan(50);
-    expect(s.inventory.salmon).toBeGreaterThan(50);
-    s.restock.salmon = 0; s.inventory.salmon = 0;
-    for (let i = 0; i < 30; i++) sim.tick(s, 0.1, { activeDistrict: null });
-    expect(s.inventory.salmon).toBe(0);
   });
 });

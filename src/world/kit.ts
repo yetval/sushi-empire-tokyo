@@ -126,14 +126,14 @@ export const GLASS_MAT = new THREE.MeshStandardMaterial({ vertexColors: true, tr
 // THREE.Color(hex) already converts sRGB → linear working space.
 const lin = (hex: string) => new THREE.Color(hex);
 
-function colorize(g: THREE.BufferGeometry, color: string, ecolor?: string, vary = 0): THREE.BufferGeometry {
+function colorize(g: THREE.BufferGeometry, color: string, ecolor?: string, vary = 0, rnd: () => number = Math.random): THREE.BufferGeometry {
   // keep (or create) an index: flat per-part colors don't need split vertices, and merge needs uniformity
   if (!g.index) { const n0 = g.attributes.position.count; const idx = new (n0 > 65535 ? Uint32Array : Uint16Array)(n0); for (let i = 0; i < n0; i++) idx[i] = i; g.setIndex(new THREE.BufferAttribute(idx, 1)); }
   if (g.attributes.uv) g.deleteAttribute('uv');
   if (g.attributes.uv1) g.deleteAttribute('uv1');
   const n = g.attributes.position.count;
   const c = lin(color);
-  if (vary) c.multiplyScalar(1 + (Math.random() - 0.5) * vary);
+  if (vary) c.multiplyScalar(1 + (rnd() - 0.5) * vary);
   const a = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; }
   g.setAttribute('color', new THREE.BufferAttribute(a, 3));
@@ -147,9 +147,40 @@ function colorize(g: THREE.BufferGeometry, color: string, ecolor?: string, vary 
 }
 
 // ---------------------------------------------------------------- primitive factories (local, bottom-centered)
+/** Box with 45° chamfered edges and corners (26 faces, flat normals): bottom-centered. */
+function chamferBox(w: number, h: number, d: number, r: number): THREE.BufferGeometry {
+  const X = w / 2, Y = h / 2, Z = d / 2;
+  const pos: number[] = [];
+  // the 24 corner points of the chamfered hull, grouped by (sx,sy,sz) corner and axis of truncation
+  const P = (sx: number, sy: number, sz: number, ax: number) => [sx * (ax === 0 ? X : X - r), sy * (ax === 1 ? Y : Y - r), sz * (ax === 2 ? Z : Z - r)];
+  const quad = (a: number[], b: number[], c: number[], e: number[]) => pos.push(...a, ...b, ...c, ...a, ...c, ...e);
+  const tri = (a: number[], b: number[], c: number[]) => pos.push(...a, ...b, ...c);
+  for (const ax of [0, 1, 2]) for (const s of [-1, 1]) { // 6 main faces
+    const u = (ax + 1) % 3, v = (ax + 2) % 3;
+    const pt = (su: number, sv: number) => { const c = [0, 0, 0]; c[ax] = s; c[u] = su; c[v] = sv; return P(c[0], c[1], c[2], ax); };
+    if (s > 0) quad(pt(-1, -1), pt(1, -1), pt(1, 1), pt(-1, 1)); else quad(pt(-1, -1), pt(-1, 1), pt(1, 1), pt(1, -1));
+  }
+  for (const ax of [0, 1, 2]) for (const s1 of [-1, 1]) for (const s2 of [-1, 1]) { // 12 edge chamfers (edge runs along ax)
+    const u = (ax + 1) % 3, v = (ax + 2) % 3;
+    const pt = (sa: number, axis: number) => { const c = [0, 0, 0]; c[ax] = sa; c[u] = s1; c[v] = s2; return P(c[0], c[1], c[2], axis); };
+    const a = pt(-1, u), b = pt(1, u), c = pt(1, v), e = pt(-1, v);
+    if (s1 * s2 > 0) quad(a, e, c, b); else quad(a, b, c, e);
+  }
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) { // 8 corner triangles
+    const a = P(sx, sy, sz, 0), b = P(sx, sy, sz, 1), c = P(sx, sy, sz, 2);
+    if (sx * sy * sz > 0) tri(a, b, c); else tri(a, c, b);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g.translate(0, Y, 0);
+}
+
 export const G = {
   box: (w: number, h: number, d: number) => new THREE.BoxGeometry(w, h, d).translate(0, h / 2, 0),
   rbox: (w: number, h: number, d: number, r = 0.08) => new RoundedBoxGeometry(w, h, d, r > 0.1 ? 2 : 1, Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001)).translate(0, h / 2, 0),
+  /** Chamfered box (one bevel segment, softened normals): crisp model-like edges for masses, slabs and kerbs. */
+  bbox: (w: number, h: number, d: number, r = 0.05) => chamferBox(w, h, d, Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001)),
   cyl: (rt: number, rb: number, h: number, seg = 12) => new THREE.CylinderGeometry(rt, rb, h, seg).translate(0, h / 2, 0),
   sphere: (r: number, w = 10, h = 8) => new THREE.SphereGeometry(r, w, h),
   ico: (r: number, d = 1) => new THREE.IcosahedronGeometry(r, d),
@@ -171,34 +202,40 @@ export function drawSign(ctx: CanvasRenderingContext2D, x: number, y: number, w:
   ctx.fillStyle = o.fg ?? '#fff6dc';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   const font = o.font ?? FONT;
+  ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
   if (o.vertical) {
     const chars = [...text];
     const fs = Math.min(w * 0.72, (h * 0.9) / chars.length);
     ctx.font = `700 ${fs}px ${font}`;
     chars.forEach((ch, i) => ctx.fillText(ch, x + w / 2, y + h / 2 + (i - (chars.length - 1) / 2) * fs * 1.02));
   } else {
-    let fs = (o.size ?? 0.62) * h * (o.sub ? 0.8 : 1);
-    ctx.font = `700 ${fs}px ${font}`;
-    const tw = ctx.measureText(text).width;
-    const cy = y + h / 2 - (o.sub ? h * 0.13 : 0);
-    if (tw > w * 0.9 && (w * 0.9) / tw < 0.62 && text.length > 6) {
-      // too long for one line: wrap at the space nearest the middle (or mid-character for CJK)
-      const mid = text.length / 2;
-      let cut = -1;
-      for (let i = 0; i < text.length; i++) if (text[i] === ' ' && (cut < 0 || Math.abs(i - mid) < Math.abs(cut - mid))) cut = i;
-      const a = cut > 0 ? text.slice(0, cut) : text.slice(0, Math.ceil(mid)), c = cut > 0 ? text.slice(cut + 1) : text.slice(Math.ceil(mid));
-      const hb = o.sub ? h * 0.62 : h * 0.9; // vertical room for the 2-line block
-      fs = Math.min(fs * 0.62, hb / 2.2);
-      ctx.font = `700 ${fs}px ${font}`;
-      const mw = Math.max(ctx.measureText(a).width, ctx.measureText(c).width);
-      if (mw > w * 0.92) { fs *= (w * 0.92) / mw; ctx.font = `700 ${fs}px ${font}`; }
-      const by = o.sub ? y + h * 0.04 + hb / 2 : y + h / 2;
-      ctx.fillText(a, x + w / 2, by - fs * 0.56); ctx.fillText(c, x + w / 2, by + fs * 0.56);
+    // Fit inside the border (or a small margin) and clip to the region: glyphs never bleed into atlas neighbours.
+    const inset = o.border ? Math.max(3, Math.min(w, h) * 0.06) + 4 : Math.max(2, Math.min(w, h) * 0.05);
+    const iw = w - inset * 2, subH = o.sub ? h * 0.26 : 0;
+    const top = y + inset, ih = h - inset * 2 - subH, mid = top + ih / 2, cx = x + w / 2;
+    const base = Math.min((o.size ?? 0.62) * h * (o.sub ? 0.8 : 1), ih * 0.86);
+    const widthAt = (t: string, f: number) => { ctx.font = `700 ${f}px ${font}`; return ctx.measureText(t).width; };
+    const fs1 = Math.min(base, base * iw / Math.max(1, widthAt(text, base)));
+    // two lines: split at the space nearest the middle (or mid-string for CJK)
+    let cut = -1;
+    const half = text.length / 2;
+    for (let i = 0; i < text.length; i++) if (text[i] === ' ' && (cut < 0 || Math.abs(i - half) < Math.abs(cut - half))) cut = i;
+    const l1 = cut > 0 ? text.slice(0, cut) : text.slice(0, Math.ceil(half)), l2 = cut > 0 ? text.slice(cut + 1) : text.slice(Math.ceil(half));
+    let fs2 = Math.min(base, ih / 2.3);
+    fs2 = Math.min(fs2, fs2 * iw / Math.max(1, widthAt(l1, fs2), widthAt(l2, fs2)));
+    if (text.length > 6 && fs1 < base * 0.62 && fs2 > fs1 * 1.15) {
+      ctx.font = `700 ${fs2}px ${font}`;
+      ctx.fillText(l1, cx, mid - fs2 * 0.58); ctx.fillText(l2, cx, mid + fs2 * 0.58);
     } else {
-      if (tw > w * 0.9) { fs *= (w * 0.9) / tw; ctx.font = `700 ${fs}px ${font}`; }
-      ctx.fillText(text, x + w / 2, cy);
+      ctx.font = `700 ${fs1}px ${font}`;
+      ctx.fillText(text, cx, mid);
     }
-    if (o.sub) { ctx.font = `600 ${h * 0.2}px ${font}`; ctx.fillText(o.sub, x + w / 2, y + h * 0.8); }
+    if (o.sub) {
+      let sf = Math.min(h * 0.2, subH * 0.78);
+      sf = Math.min(sf, sf * iw / Math.max(1, (ctx.font = `600 ${sf}px ${font}`, ctx.measureText(o.sub).width)));
+      ctx.font = `600 ${sf}px ${font}`;
+      ctx.fillText(o.sub, cx, y + h - inset - subH / 2);
+    }
   }
   ctx.restore();
 }
@@ -261,6 +298,53 @@ function remapUV(g: THREE.BufferGeometry, r: [number, number, number, number]): 
   return g;
 }
 
+// ---------------------------------------------------------------- instanced detail parts
+/** A reusable detail part (window bay, AC unit, railing bay…) drawn as one InstancedMesh per Builder.build().
+ *  Its geometry carries baked vertex colors plus `emask` (1 = glass / lit parts, which take the per-instance glow). */
+export interface Proto { name: string; geo: THREE.BufferGeometry; shadow: boolean; tint: 'mask' | 'body' }
+const PROTOS = new Map<string, Proto>();
+const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _v = new THREE.Vector3(), _s = new THREE.Vector3();
+const _white = new THREE.Color(1, 1, 1), _black = new THREE.Color(0, 0, 0);
+/** Define (once, cached by name) a prototype from Builder calls in its local frame. tint: what instance colors recolor. */
+export function proto(name: string, build: (b: Builder) => void, o: { shadow?: boolean; tint?: 'mask' | 'body' } = {}): Proto {
+  let p = PROTOS.get(name);
+  if (!p) {
+    const b = new Builder(null, 1e6);
+    build(b);
+    p = { name, geo: b.bake(), shadow: o.shadow ?? false, tint: o.tint ?? 'mask' };
+    PROTOS.set(name, p);
+  }
+  return p;
+}
+function instMat(tint: 'mask' | 'body'): THREE.MeshStandardMaterial {
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72, metalness: 0.0 });
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uGlow = glow;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float emask;\nattribute vec3 iglow;\nvarying float vEm;\nvarying vec3 vIG;')
+      .replace('#include <color_vertex>', `#include <color_vertex>
+#ifdef USE_INSTANCING_COLOR
+  vColor.rgb = color.rgb * mix(vec3(1.0), instanceColor.rgb, ${tint === 'mask' ? 'emask' : '1.0 - emask'});
+#endif
+vEm = emask; vIG = iglow;`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uGlow;\nvarying float vEm;\nvarying vec3 vIG;')
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.1, vEm * step(dot(vIG, vIG), 1e-6));')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+totalEmissiveRadiance += vIG * vEm * uGlow;
+{ // glass: a soft sky-gradient reflection by day so panes read as glass without an env map per material
+  float fres = pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), 2.5);
+  float day = saturate(1.0 - uGlow * 1.2);
+  totalEmissiveRadiance += vEm * step(dot(vIG, vIG), 1e-6) * vec3(0.42, 0.52, 0.62) * (0.05 + 0.4 * fres) * day;
+}`);
+  };
+  m.customProgramCacheKey = () => 'inst-' + tint;
+  return m;
+}
+/** Instanced parts whose instance colour tints the glass/lit panes (windows) or the body (AC units, bikes, vending). */
+export const INST_MAT = instMat('mask');
+export const INST_BODY_MAT = instMat('body');
+
 // ---------------------------------------------------------------- builder
 type Layer = 'vc' | 'glow' | 'roof' | 'clean' | 'glass';
 
@@ -276,11 +360,50 @@ export class Builder {
   private signs: THREE.BufferGeometry[] = [];
   private decals: THREE.BufferGeometry[] = [];
   private pools: THREE.BufferGeometry[] = [];
+  /** Instances grouped per (proto, coarse area cell) so each InstancedMesh gets a tight bounding sphere and frustum-culls. */
+  private insts = new Map<string, { p: Proto; m: number[]; c: number[]; g: number[] }>();
   colliders: Collider[] = [];
   /** When true, opaque parts use the clean (no-wear) interior material. */
   clean = false;
+  /** Seeded so per-part color variation (and therefore every district) is identical on every visit. */
+  rnd = rng(9137);
 
   constructor(public atlas: Atlas | null = null, private cell = 40) {}
+
+  /** Place one instance of a prototype part (bottom-centered, facing local +z) in the current frame.
+   *  color tints the proto's tint target (glass or body), glow is the night emission of its masked (lit) parts. */
+  inst(p: Proto, x: number, y: number, z: number, o: { ry?: number; rx?: number; rz?: number; s?: [number, number, number]; color?: string; glow?: string } = {}): this {
+    _q.setFromEuler(_e.set(o.rx ?? 0, o.ry ?? 0, o.rz ?? 0));
+    _v.set(x, y, z);
+    _s.set(...(o.s ?? [1, 1, 1]));
+    _m.compose(_v, _q, _s).premultiply(this.m);
+    const IC = Math.max(this.cell, 48);
+    const key = `${p.name}|${Math.floor(_m.elements[12] / IC)},${Math.floor(_m.elements[14] / IC)}`;
+    let L = this.insts.get(key);
+    if (!L) this.insts.set(key, (L = { p, m: [], c: [], g: [] }));
+    L.m.push(..._m.elements);
+    const c = o.color ? lin(o.color) : _white;
+    L.c.push(c.r, c.g, c.b);
+    const g = o.glow ? lin(o.glow) : _black;
+    L.g.push(g.r, g.g, g.b);
+    return this;
+  }
+
+  /** Merge everything added so far into ONE geometry with an `emask` attribute (1 = glow/glass parts). Used for protos. */
+  bake(): THREE.BufferGeometry {
+    const parts: THREE.BufferGeometry[] = [];
+    for (const cell of this.cells.values()) for (const layer of ['vc', 'glow', 'roof', 'clean', 'glass'] as Layer[]) for (const g of cell[layer]) {
+      const n = g.attributes.position.count;
+      g.setAttribute('emask', new THREE.BufferAttribute(new Float32Array(n).fill(layer === 'glow' || layer === 'glass' ? 1 : 0), 1));
+      if (g.attributes.ecolor) g.deleteAttribute('ecolor');
+      parts.push(g);
+    }
+    const out = mergeGeometries(parts)!;
+    for (const g of parts) g.dispose();
+    this.cells.clear();
+    out.computeBoundingSphere();
+    return out;
+  }
 
   push(x: number, y: number, z: number, ry = 0): this {
     this.stack.push(this.m.clone()); this.ryStack.push(this.ry);
@@ -305,7 +428,7 @@ export class Builder {
     }
     g.applyMatrix4(this.m);
     const layer: Layer = o.glass ? 'glass' : o.glow !== undefined ? 'glow' : o.roof ? 'roof' : this.clean ? 'clean' : 'vc';
-    g = colorize(g, color, o.glow, o.vary ?? (layer === 'glow' ? 0 : 0.07));
+    g = colorize(g, color, o.glow, o.vary ?? (layer === 'glow' ? 0 : 0.07), this.rnd);
     g.computeBoundingBox();
     const c = g.boundingBox!.getCenter(new THREE.Vector3());
     const key = `${Math.floor(c.x / this.cell)},${Math.floor(c.z / this.cell)}`;
@@ -415,6 +538,20 @@ export class Builder {
       m.renderOrder = 1;
       out.add(m);
     }
+    for (const L of this.insts.values()) {
+      const p = L.p;
+      const n = L.c.length / 3;
+      const geo = p.geo.clone(); // own copy per mesh: the instanced glow attribute lives on the geometry
+      geo.setAttribute('iglow', new THREE.InstancedBufferAttribute(new Float32Array(L.g), 3));
+      const mesh = new THREE.InstancedMesh(geo, p.tint === 'body' ? INST_BODY_MAT : INST_MAT, n);
+      (mesh.instanceMatrix.array as Float32Array).set(L.m);
+      mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(L.c), 3);
+      mesh.castShadow = shadows && p.shadow; mesh.receiveShadow = true;
+      mesh.computeBoundingSphere();
+      mesh.name = 'inst:' + p.name;
+      out.add(mesh);
+    }
+    this.insts.clear();
     this.cells.clear(); this.signs = []; this.pools = []; this.decals = [];
     return out;
   }
