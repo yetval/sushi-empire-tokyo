@@ -263,7 +263,7 @@ export function buildDistrict(id: DistrictId, s: GameState): DistrictScene {
       interiorWarm.value = 0.06 + night * 0.42;
       atlas.mat.emissiveIntensity = 0.22 + night * 0.85;
       POOL_MAT.opacity = night * 0.6;
-      for (const v of views) v.updateRoof(p);
+      for (const v of views) { v.updateRoof(p); v.animate(dt); }
       ctx.traffic.update(dt, p);
       petals?.update(dt);
       for (const sc of ctx.screens) sc.update(dt, state);
@@ -328,11 +328,13 @@ function asakusa(ctx: Ctx): Layout {
   ctx.sites.push({ id: 'asakusa_stand', x: -11, z: 10.6, ry: Math.PI, w: 5, d: 2.8, style: 'wood', color: C.wood });
   ctx.sites.push({ id: 'asakusa_shop', x: -16.5, z: -7.5, ry: 0, w: 11, d: 10, style: 'wood', color: '#e9dcc3' });
   ctx.sites.push({ id: 'asakusa_house', x: -30, z: 7.5, ry: Math.PI, w: 13, d: 12, style: 'wood', color: '#efe2c9' });
+  ctx.sites.push({ id: 'asakusa_market', x: 30, z: -7.5, ry: 0, w: 13, d: 11, style: 'wood', color: '#e3d2b4' });
+  ctx.sites.push({ id: 'asakusa_alley', x: 42, z: 7.5, ry: Math.PI, w: 9, d: 9, style: 'wood', color: '#eadcc0' });
   ctx.rivals.push(new RivalView('kaiten', 'asakusa', 16.5, -7.5, 0, 10, 'wood', ctx.atlas));
 
   // ----- north frontage (front z=-7.5, faces road)
   b.push(0, 0, -7.5, 0);
-  frontage(b, -90, 90, [[-22, -11], [-11, 11], [11.5, 21.5]], 'wood', r, [], ['#efe2c9', '#e6d5b8', '#f3e9d6', '#d9c3a0', '#c9b08a'], { depth: 13.5, minF: 2, maxF: 3, kinds: ['souvenir', 'souvenir', 'souvenir', 'ramen', 'izakaya', 'kissaten', 'soba', 'pharmacy', 'books', 'grocer', 'florist', 'generic'] as ShopKind[] });
+  frontage(b, -90, 90, [[-22, -11], [-11, 11], [11.5, 21.5], [23.5, 36.5]], 'wood', r, [], ['#efe2c9', '#e6d5b8', '#f3e9d6', '#d9c3a0', '#c9b08a'], { depth: 13.5, minF: 2, maxF: 3, kinds: ['souvenir', 'souvenir', 'souvenir', 'ramen', 'izakaya', 'kissaten', 'soba', 'pharmacy', 'books', 'grocer', 'florist', 'generic'] as ShopKind[] });
   // narrow fillers beside the gate, shallow so the market street behind stays open
   building(b, { x: -8.75, w: 3.5, d: 5, floors: 2, style: 'wood', r, color: '#e6d5b8', kind: 'souvenir', shop: '扇子', clutter: false });
   building(b, { x: 9.25, w: 3.5, d: 5, floors: 2, style: 'wood', r, color: '#efe2c9', kind: 'souvenir', shop: '団子', clutter: false });
@@ -515,7 +517,7 @@ function asakusa(ctx: Ctx): Layout {
   // south frontage (front z=7.5, faces road). local x = -world x
   b.push(0, 0, 7.5, Math.PI);
   // reserved (local = -world): alley 26..29, Mika 8..16, metro 0.6..5.4, plaza -22..-1.2, house -36.5..-23.5
-  frontage(b, -90, 90, [[-29, -26], [-16, -8], [-5.4, 1.2], [1.2, 22], [23.5, 36.5]], 'wood', r, [], ['#efe2c9', '#e6d5b8', '#f3e9d6', '#d9c3a0'], { depth: 14, minF: 2, maxF: 3, kinds: ['souvenir', 'souvenir', 'souvenir', 'ramen', 'izakaya', 'kissaten', 'soba', 'pharmacy', 'books', 'grocer', 'florist', 'generic'] as ShopKind[] });
+  frontage(b, -90, 90, [[-46.5, -37.5], [-29, -26], [-16, -8], [-5.4, 1.2], [1.2, 22], [23.5, 36.5]], 'wood', r, [], ['#efe2c9', '#e6d5b8', '#f3e9d6', '#d9c3a0'], { depth: 14, minF: 2, maxF: 3, kinds: ['souvenir', 'souvenir', 'souvenir', 'ramen', 'izakaya', 'kissaten', 'soba', 'pharmacy', 'books', 'grocer', 'florist', 'generic'] as ShopKind[] });
   b.pop();
   // the yokocho alley
   b.box(27.5, 0.001, 14, 3, 0.012, 13, '#b9ad99');
@@ -537,8 +539,8 @@ function asakusa(ctx: Ctx): Layout {
   vendingCluster(b, 23.6, 6.95, Math.PI, 3, r); vendingCluster(b, -45, -6.95, 0, 2, r);
   trafficLight(b, -2.6, -4.0, 0); trafficLight(b, 2.6, 4.0, Math.PI);
   for (const x of [-48, -38, 24, 36, 47]) ctx.sakuras.push(sakura(b, x, -6.9, 0.85, r));
-  for (let i = 0; i < 5; i++) bike(b, 30 + i * 0.7, -7.0, Math.PI / 2 + 0.1, ['#3a86ff', '#ff006e', '#8ac926', '#ffbe0b', '#fb5607'][i]);
-  for (const x of [-44, 40]) { bench(b, x, 6.9, Math.PI); planter(b, x + 2, 6.9); planter(b, x - 2, 6.9, '#ffd23f'); }
+  for (let i = 0; i < 5; i++) bike(b, -54 + i * 0.7, -7.0, Math.PI / 2 + 0.1, ['#3a86ff', '#ff006e', '#8ac926', '#ffbe0b', '#fb5607'][i]);
+  for (const x of [-44, 52]) { bench(b, x, 6.9, Math.PI); planter(b, x + 2, 6.9); planter(b, x - 2, 6.9, '#ffd23f'); }
   bin(b, 6.6, 7.0); bin(b, -24, -7.0);
   b.collide(6.6, 7.6, 0.5, 1.2, 0.9, false); b.collide(-24, -7.6, 0.5, 1.2, 0.9, false); // no wedge gap to the wall
   scooter(b, -5.6, -7.0, 0.1, '#e63946');
@@ -679,12 +681,14 @@ function shibuya(ctx: Ctx): Layout {
   const R = 7;
   ctx.sites.push({ id: 'shibuya_crossing', x: -24, z: 11, ry: Math.PI, w: 11, d: 10, style: 'modern', color: '#ff8fab' });
   ctx.sites.push({ id: 'shibuya_center', x: 26, z: 11, ry: Math.PI, w: 16, d: 14, style: 'modern', color: '#5e60ce' });
+  ctx.sites.push({ id: 'shibuya_scramble', x: 44, z: 11, ry: Math.PI, w: 14, d: 12, style: 'modern', color: '#ffb703' });
+  ctx.sites.push({ id: 'shibuya_alley', x: 54, z: -11, ry: 0, w: 9, d: 9, style: 'modern', color: '#c77dff' });
   ctx.rivals.push(new RivalView('kaiten', 'shibuya', -40, -11, 0, 10, 'modern', ctx.atlas));
   ctx.rivals.push(new RivalView('maguro', 'shibuya', 40, -11, 0, 10, 'modern', ctx.atlas));
   const F = crossCity(ctx, {
     road: R, side: 4, style: 'modern', shops: [], kinds: ['ramen', 'karaoke', 'pachinko', 'konbini', 'izakaya', 'pharmacy', 'generic', 'kissaten', 'books', 'salon', 'realestate', 'ramen'], colors: ['#e8e3da', '#c9d1db', '#f2c6c2', '#b8c4d9', '#ffe1a8', '#d7c4e8', '#9aa5b1', '#d8c3a5', '#bfa58a'],
     minF: 4, maxF: 8, lanes: 4, lampStyle: 'modern', neon: true,
-    reservedEW: { north: [[-29.5, -11], [-45, -35], [35, 45], [11, 29]], south: [[-29.5, -18.5], [18, 34]] },
+    reservedEW: { north: [[-29.5, -11], [-45, -35], [35, 45], [11, 29], [49.5, 58.5]], south: [[-29.5, -18.5], [18, 34], [37, 51]] },
   });
   // diagonal scramble stripes
   for (const d of [-1, 1]) for (let i = -8; i <= 8; i++) {
@@ -721,7 +725,7 @@ function shibuya(ctx: Ctx): Layout {
   for (const [x, z, ry, t, c] of [[F + 0.4, -F - 20, -Math.PI / 2, 'カラオケ', '#ff006e'], [-F - 0.4, F + 20, Math.PI / 2, 'ゲーム', '#3a86ff'], [F + 0.4, F + 22, -Math.PI / 2, 'ラーメン', '#ffbe0b']] as const) {
     b.sign(x as number, 9, z as number, 1.4, 6, t as string, { bg: '#14141f', fg: c as string, vertical: true, ry: ry as number, px: 60, border: c as string });
   }
-  for (const x of [-50, 52]) { vending(b, x, -F + 0.6, 0, '#ff006e'); vending(b, x + 1.1, -F + 0.6, 0, '#3a86ff'); }
+  for (const x of [-50, -57]) { vending(b, x, -F + 0.6, 0, '#ff006e'); vending(b, x + 1.1, -F + 0.6, 0, '#3a86ff'); }
   for (let i = 0; i < 6; i++) bike(b, -56 + i * 0.7, F - 0.7, Math.PI / 2, ['#3a86ff', '#ff006e', '#8ac926'][i % 3]);
   cityTraffic(ctx, R, [['taxi', '#1d3557'], ['bus', '#e9f5db'], ['sedan', '#ffffff'], ['kei', '#ffbe0b'], ['scooter', '#ff006e'], ['taxi', '#ffd23f'], ['van', '#c9d1db'], ['sedan', '#e63946'], ['scooter', '#3a86ff']]);
   return {
@@ -737,6 +741,8 @@ function shinjuku(ctx: Ctx): Layout {
   const R = 8;
   ctx.sites.push({ id: 'shinjuku_lunch', x: -26, z: 13, ry: Math.PI, w: 12, d: 10, style: 'modern', color: '#cfd8dc' });
   ctx.sites.push({ id: 'shinjuku_tower', x: 28, z: -13, ry: 0, w: 18, d: 16, style: 'modern', color: '#90a4ae' });
+  ctx.sites.push({ id: 'shinjuku_omoide', x: 47, z: -13, ry: 0, w: 9, d: 9, style: 'modern', color: '#8d6e63' });
+  ctx.sites.push({ id: 'shinjuku_station', x: 50, z: 13, ry: Math.PI, w: 14, d: 12, style: 'modern', color: '#b0bec5' });
   ctx.rivals.push(new RivalView('kaiten', 'shinjuku', -26, -13, 0, 10, 'modern', ctx.atlas));
   ctx.rivals.push(new RivalView('maguro', 'shinjuku', -42, -13, 0, 10, 'modern', ctx.atlas));
   ctx.rivals.push(new RivalView('golden', 'shinjuku', -46, 13, Math.PI, 10, 'modern', ctx.atlas));
@@ -744,7 +750,7 @@ function shinjuku(ctx: Ctx): Layout {
   const F = crossCity(ctx, {
     road: R, side: 5, style: 'modern', shops: [], kinds: ['ramen', 'izakaya', 'konbini', 'pharmacy', 'soba', 'realestate', 'karaoke', 'generic', 'kissaten', 'izakaya'], colors: ['#cfd8dc', '#b0bec5', '#eceff1', '#a7b6c2', '#dfe6e9', '#d8c3a5', '#c9b18f'],
     minF: 5, maxF: 9, lanes: 4, lampStyle: 'modern', neon: true,
-    reservedEW: { north: [[-31, -21], [-47, -37], [19, 37], [-21, -13]], south: [[-32, -20], [-51, -41], [17, 39]] },
+    reservedEW: { north: [[-31, -21], [-47, -37], [19, 37], [-21, -13], [42.5, 51.5]], south: [[-32, -20], [-51, -41], [17, 39], [43, 57]] },
     northCornerDepth: { east: 17 },
   });
   // NW plaza with metro
@@ -762,7 +768,7 @@ function shinjuku(ctx: Ctx): Layout {
     b.pop();
   }
   for (let x = -58; x <= 58; x += 9) if (Math.abs(x) > F + 3) { if (Math.abs(x + 3 + 17) > 5) greenTree(b, x + 3, -R - 2.2, 0.9, r); greenTree(b, x - 2, R + 2.2, 0.9, r); }
-  for (const x of [-55, 50]) { vending(b, x, -F + 0.6, 0, '#43a047'); vending(b, x + 1.1, -F + 0.6, 0, '#e94e3c'); }
+  for (const x of [-55, -61]) { vending(b, x, -F + 0.6, 0, '#43a047'); vending(b, x + 1.1, -F + 0.6, 0, '#e94e3c'); }
   cityTraffic(ctx, R, [['taxi', '#1d3557'], ['bus', '#e9f5db'], ['sedan', '#2b2d42'], ['van', '#ffffff'], ['taxi', '#ffd23f'], ['sedan', '#8d99ae'], ['kei', '#ffffff'], ['bus', '#a8dadc'], ['scooter', '#ff9f1c']]);
   return {
     spawn: S(-17, -15, 0), metro: S(-17, -17.2, Math.PI), hq: S(28, F - 0.8, Math.PI),
@@ -777,11 +783,13 @@ function ginza(ctx: Ctx): Layout {
   const R = 6;
   ctx.sites.push({ id: 'ginza_omakase', x: -24, z: 11, ry: Math.PI, w: 12, d: 10, style: 'lux', color: '#f5f1e8' });
   ctx.sites.push({ id: 'ginza_flagship', x: -28, z: -11, ry: 0, w: 18, d: 16, style: 'lux', color: '#efe8da' });
+  ctx.sites.push({ id: 'ginza_corner', x: 42, z: 11, ry: Math.PI, w: 10, d: 10, style: 'lux', color: '#ece4d4' });
+  ctx.sites.push({ id: 'ginza_tower', x: 45, z: -11, ry: 0, w: 14, d: 12, style: 'lux', color: '#dcd3c3' });
   ctx.rivals.push(new RivalView('golden', 'ginza', 26, 11, Math.PI, 12, 'lux', ctx.atlas));
   const F = crossCity(ctx, {
     road: R, side: 5, style: 'lux', shops: [], kinds: ['boutique', 'boutique', 'boutique', 'kissaten', 'florist', 'boutique', 'generic'], colors: ['#f5f1e8', '#ece4d4', '#e8e0d0', '#d9d2c5', '#f8f4ec', '#c9bfae'],
     minF: 4, maxF: 7, lanes: 4, lampStyle: 'lux',
-    reservedEW: { north: [[-37, -19], [11, 26], [-17.2, -11]], south: [[-30, -18], [20, 32]] },
+    reservedEW: { north: [[-37, -19], [11, 26], [-17.2, -11], [38, 52]], south: [[-30, -18], [20, 32], [37, 47]] },
     northCornerDepth: { west: 17 },
   });
   // clock tower corner building
@@ -815,7 +823,7 @@ function ginza(ctx: Ctx): Layout {
   for (let x = -58; x <= 58; x += 10) if (Math.abs(x) > F + 3) {
     greenTree(b, x, -R - 1.3, 0.95, r); greenTree(b, x + 5, R + 1.3, 0.95, r);
   }
-  for (const x of [-48, 44]) { bench(b, x, F - 0.8, Math.PI); planter(b, x + 2, F - 0.8, '#ffffff'); planter(b, x - 2, F - 0.8, '#ff7aa8'); }
+  for (const x of [-48, 55]) { bench(b, x, F - 0.8, Math.PI); planter(b, x + 2, F - 0.8, '#ffffff'); planter(b, x - 2, F - 0.8, '#ff7aa8'); }
   ctx.sakuras.push(sakura(b, -45, -F + 1.4, 0.8, r), sakura(b, 46, -F + 1.4, 0.8, r));
   cityTraffic(ctx, R, [['sedan', '#111111'], ['taxi', '#1d3557'], ['sedan', '#ffffff'], ['van', '#2d2d33'], ['sedan', '#7d1d3f'], ['taxi', '#ffd23f'], ['sedan', '#c0c0c0']]);
   return {

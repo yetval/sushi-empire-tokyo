@@ -17,6 +17,14 @@ const STYLE_PAL: Record<string, typeof THEMES[number]> = {
   lux: { wall: '#c99c6b', floor: '#5e4a3a', accent: '#3b2a20', counter: '#f2dcae' },
   salary: { wall: '#6b5240', floor: '#45454b', accent: '#7d8590', counter: '#b98a5a' }, // Shinjuku lunch counter
 };
+/** Format palettes override the district look so each concept reads instantly. */
+const CONCEPT_PAL: Record<string, typeof THEMES[number]> = {
+  kaiten: { wall: '#fbf6ee', floor: '#e2ddd6', accent: '#d62839', counter: '#ffffff' },
+  omakase: { wall: '#4d3c31', floor: '#5a4738', accent: '#2a1f1a', counter: '#f0d9a8' },
+  kiosk: { wall: '#f4f1ea', floor: '#cfcac2', accent: '#2a9d8f', counter: '#ffffff' },
+  ghost: { wall: '#a3a9b0', floor: '#6b7078', accent: '#5c6470', counter: '#c9ced4' },
+};
+const PLATE_COLORS = ['#ffffff', '#ffd23f', '#e63946', '#3a86ff', '#1d1d1d', '#7cc46a'].map((c) => new THREE.Color(c));
 const THEMES = [
   { wall: '#f3e6cf', floor: '#c49a6c', accent: '#8a5a3c', counter: '#e9cf9f' },
   { wall: '#33425f', floor: '#5b4636', accent: '#1f2a40', counter: '#d8b98a' },
@@ -60,23 +68,62 @@ export class SiteView {
   private kind: string;
   private L: ReturnType<typeof buildingLayout> | null = null;
   private atlas: Atlas | null = null;
+  private baseSeats: Spot[] = [];
+  private belt: { plates: THREE.InstancedMesh; sushi: THREE.InstancedMesh; x0: number; x1: number; zf: number; zb: number; t: number } | null = null;
 
   constructor(public def: SiteDef) {
     this.kind = PROPERTIES[def.id].kind;
     const f = new Builder().push(def.x, 0, def.z, def.ry);
     if (this.kind === 'stand') this.site = standSpots(f, def.id);
     else { this.L = buildingLayout(def.w, def.d, 12); this.site = toSite(f, def, this.L); }
+    this.baseSeats = this.site.seats.map((sp) => ({ ...sp }));
     this.group.add(this.roof);
+  }
+
+  /** Seat spots follow the format: counter stools (omakase), wall & window ledges (kiosk), tables otherwise.
+   *  Mutated in place so the NPC system (which keeps references) sees the new layout. */
+  private applySeats(concept: string): void {
+    if (!this.L) return;
+    const f = new Builder().push(this.def.x, 0, this.def.z, this.def.ry);
+    const L = this.L, w = this.def.w;
+    const pts: [number, number, number][] = [];
+    if (concept === 'omakase') { for (let x = L.counterX0 + 0.45; x < L.counterX1 - 0.3; x += 0.62) if (Math.abs(x - L.qx) > 0.85) pts.push([x, L.cz + 0.72, Math.PI]); }
+    else if (concept === 'kiosk') {
+      for (let z = -1.5; z > L.cz + 2.0; z -= 0.7) pts.push([-w / 2 + 0.65, z, -Math.PI / 2]);
+      for (let x = -w / 2 + 0.7; x < w / 2 - 1.6; x += 0.7) if (Math.abs(x - L.doorX) > 1.5) pts.push([x, -0.68, 0]);
+    }
+    this.site.seats.forEach((sp, i) => {
+      const src = pts.length ? f.spot(pts[i % pts.length][0], pts[i % pts.length][1], pts[i % pts.length][2]) : this.baseSeats[i];
+      sp.x = src.x; sp.z = src.z; sp.yaw = src.yaw;
+    });
+  }
+
+  /** Per-frame: kaiten plates ride the belt. */
+  animate(dt: number): void {
+    const B = this.belt;
+    if (!B) return;
+    B.t += dt * 0.32;
+    const lenX = B.x1 - B.x0, lenZ = B.zf - B.zb, P = 2 * lenX + 2 * lenZ, n = B.plates.count;
+    const m = new THREE.Matrix4();
+    for (let i = 0; i < n; i++) {
+      let u = (((i / n) * P + B.t) % P + P) % P, x: number, z: number;
+      if (u < lenX) { x = B.x0 + u; z = B.zf; } else if ((u -= lenX) < lenZ) { x = B.x1; z = B.zf - u; } else if ((u -= lenZ) < lenX) { x = B.x1 - u; z = B.zb; } else { u -= lenX; x = B.x0; z = B.zb + u; }
+      m.makeTranslation(x, 1.14, z); B.plates.setMatrixAt(i, m);
+      m.makeRotationY(Math.PI / 2).setPosition(x, 1.16, z); B.sushi.setMatrixAt(i, m);
+    }
+    B.plates.instanceMatrix.needsUpdate = true; B.sushi.instanceMatrix.needsUpdate = true;
   }
 
   refresh(s: GameState): boolean {
     const r = s.restaurants[this.def.id];
-    const h = JSON.stringify([!!r, r?.upgrades, r?.name, r?.signColor, r?.theme, r?.menu, r?.priceMult, s.recipes.length, s.flags.chapter2, s.player.company]);
+    const h = JSON.stringify([!!r, r?.concept, r?.upgrades, r?.name, r?.signColor, r?.theme, r?.menu, r?.priceMult, s.recipes.length, s.flags.chapter2, s.player.company]);
     if (h === this.hash) return false;
     this.hash = h;
     for (const c of [...this.group.children]) if (c !== this.roof) { this.group.remove(c); disposeTree(c); }
     for (const c of [...this.roof.children]) { this.roof.remove(c); disposeTree(c); }
     if (this.atlas) { this.atlas.tex.dispose(); this.atlas.mat.dispose(); this.atlas.decalMat.dispose(); }
+    this.belt = null;
+    this.applySeats(r?.concept ?? 'bar');
     this.atlas = new Atlas(1024);
     const b = new Builder(this.atlas, 1000).push(this.def.x, 0, this.def.z, this.def.ry);
     const rb = new Builder(this.atlas, 1000).push(this.def.x, 0, this.def.z, this.def.ry);
@@ -236,7 +283,9 @@ export class SiteView {
     const ext = this.def.color;
     const pw = Math.min(w - 1.2, 3.4 + (p.kind === 'flagship' ? 1.2 : p.kind === 'restaurant' ? 0.6 : 0)); // name plaque width
     const rand = rng(this.def.id.length * 977 + w);
-    const pal = r && r.theme !== 0 ? th : STYLE_PAL[this.def.id.startsWith('shinjuku') ? 'salary' : style] ?? th;
+    this.lastUpgrades = u;
+    const concept = r?.concept ?? 'bar';
+    const pal = r && r.theme !== 0 ? th : CONCEPT_PAL[concept] ?? STYLE_PAL[this.def.id.startsWith('shinjuku') ? 'salary' : style] ?? th;
     // floor (clean interior material)
     b.clean = true;
     b.box(0, 0, -d / 2, w, 0.05, d, owned ? pal.floor : '#8b8580');
@@ -258,7 +307,8 @@ export class SiteView {
       b.box(sx, 0, 0, sw, 0.6, 0.2, frameC); // sill
       b.box(sx, 2.6, 0, sw, gh - 2.6, 0.2, ext); // lintel
       if (sw > 0.8) {
-        if (owned) b.box(sx, 0.6, 0, sw - 0.2, 2.0, 0.06, style === 'wood' ? '#f4e6c8' : '#bcd8e8', style === 'wood' ? '#ffd28a' : '#fff0c8');
+        if (owned && concept !== 'ghost') b.box(sx, 0.6, 0, sw - 0.2, 2.0, 0.06, style === 'wood' ? '#f4e6c8' : '#bcd8e8', style === 'wood' ? '#ffd28a' : '#fff0c8');
+        else if (owned) { b.box(sx, 0.6, 0.04, sw - 0.2, 2.0, 0.08, '#8d949c'); for (let k = 0; k < 8; k++) b.box(sx, 0.7 + k * 0.24, 0.09, sw - 0.2, 0.03, 0.02, '#767c85'); }
         else b.box(sx, 0.6, 0.04, sw - 0.2, 2.0, 0.08, '#9aa0a8'); // shutters
         if (style === 'wood') for (let k = 1; k < sw / 0.5; k++) b.box(a + k * 0.5, 0.6, 0.05, 0.05, 2.0, 0.05, C.woodD);
         else b.box(sx, 1.6, 0.05, sw - 0.2, 0.06, 0.05, frameC);
@@ -279,12 +329,14 @@ export class SiteView {
       this.addPlaque(sp.x, 1.55, sp.z + 0.05, 1.7, 0.55);
     } else {
       // door: noren for wood, glass doors otherwise
-      if (style === 'wood') noren(b, dx, 2.55, 0.1, dw - 0.1, r!.signColor === '#c0392b' ? '#24345c' : r!.signColor, 'すし');
+      if (style === 'wood' || concept === 'omakase') noren(b, dx, 2.55, 0.1, dw - 0.1, concept === 'omakase' ? '#f3ead8' : r!.signColor === '#c0392b' ? '#24345c' : r!.signColor, concept === 'omakase' ? '鮨' : 'すし');
       else { b.box(dx - dw / 2 + 0.05, 0, 0.0, 0.06, 2.6, 0.12, frameC); b.box(dx + dw / 2 - 0.05, 0, 0, 0.06, 2.6, 0.12, frameC); }
       // name board above door
-      this.plaque.draw(r!.name, r!.signColor, '#fff5dc', style === 'lux' ? '鮨 · OMAKASE' : '寿司 · SUSHI');
+      if (concept === 'omakase') this.plaque.draw(r!.name, '#2a1d1a', '#e9d3a8', '鮨 · おまかせ');
+      else this.plaque.draw(r!.name, r!.signColor, '#fff5dc', concept === 'kaiten' ? '回転寿司 · KAITEN' : concept === 'kiosk' ? '持ち帰り · TAKEOUT' : concept === 'ghost' ? 'デリバリー · DELIVERY' : style === 'lux' ? '鮨 · OMAKASE' : '寿司 · SUSHI');
       this.plaque.mat.emissiveIntensity = 0.3 + (u.sign ?? 0) * 0.2;
-      this.addPlaque(dx, style === 'wood' ? 3.1 : 3.28, 0.16, pw, Math.min(1.15, pw / 3.2)); // keep the 512×160 canvas aspect
+      const ppw = concept === 'omakase' ? Math.min(pw, 2.4) : pw;
+      this.addPlaque(dx, style === 'wood' ? 3.1 : 3.28, 0.16, ppw, Math.min(1.15, ppw / 3.2)); // keep the 512×160 canvas aspect
       b.clean = true;
       this.interior(b, s, r!, pal, L);
       b.clean = false;
@@ -317,15 +369,17 @@ export class SiteView {
     // ---------- street presence: canopy/noren, vertical kanban, rooftop, all scaled by kind
     const big = p.kind === 'flagship' ? 2 : p.kind === 'restaurant' ? 1 : 0;
     const sc = r!.signColor;
+    this.formatFront(b, rb, s, r!, concept, h, gh);
+    if (concept === 'omakase') return; // minimal signage: noren, small plaque, wooden sign only
     if (style !== 'wood') {
-      awning(b, dx, 2.74, 0.14, dw + 1.4 + big * 0.8, 1.1, sc, style === 'lux' ? '#1f2a24' : '#ffffff');
+      awning(b, dx, 2.74, 0.14, dw + 1.4 + big * 0.8, 1.1, concept === 'kaiten' ? '#d62839' : sc, style === 'lux' ? '#1f2a24' : '#ffffff');
       if (style === 'lux') b.box(dx, 2.42, 1.22, dw + 1.6 + big * 0.8, 0.08, 0.08, C.gold);
     }
     const kh = Math.min(h - gh - 0.6, [3.2, 5.0, 7.4][big]);
     const kx = -w / 2 + 0.6;
     rb.box(kx, gh + 0.25, 0.42, 1.0 + big * 0.2, kh + 0.2, 0.22, '#1d1d24');
     rb.add(G.box(0.92 + big * 0.2, kh + 0.08, 0.04), sc, { at: [kx, gh + 0.31, 0.54], glow: (u.sign ?? 0) >= 1 ? sc : '#000000' });
-    rb.sign(kx, gh + 0.35 + kh / 2, 0.57, 0.8 + big * 0.18, kh - 0.25, ['寿司処', '江戸前寿司', '本格江戸前鮨'][big], { bg: '#fff8e8', fg: sc, vertical: true, px: 60 });
+    rb.sign(kx, gh + 0.35 + kh / 2, 0.57, 0.8 + big * 0.18, kh - 0.25, concept === 'kaiten' ? '回転寿司' : concept === 'kiosk' ? '持ち帰り寿司' : concept === 'ghost' ? 'デリバリー' : ['寿司処', '江戸前寿司', '本格江戸前鮨'][big], { bg: '#fff8e8', fg: sc, vertical: true, px: 60 });
     rb.box(kx, gh + 0.9, 0.2, 0.08, 0.08, 0.5, C.metalD); rb.box(kx, gh + kh - 0.2, 0.2, 0.08, 0.08, 0.5, C.metalD);
     if (style !== 'wood') {
       // parapet + rooftop dressing
@@ -354,12 +408,147 @@ export class SiteView {
     if (pl >= 1) { planter(b, dx - dw / 2 - 0.7, 0.75); planter(b, dx + dw / 2 + 0.7, 0.75, '#ffd23f'); }
     if (pl >= 2) for (let i = 0; i < 3; i++) bonsai(b, L.counterX0 + 0.5 + i * 1.6, 1.12, L.cz + 0.15);
     if (pl >= 3) for (const x of [-w / 2 + 0.5, w / 2 - 0.5]) for (let i = 0; i < 3; i++) b.add(G.cyl(0.05, 0.06, 2.8, 6), '#7fb069', { at: [x, 0.05, -1 - i * 0.3] });
-    for (let i = 0; i < (u.delivery ?? 0); i++) scooter(b, dx - 2.7 - i * 0.9, 1.5, Math.PI / 2, ['#ff8fab', '#ffd23f', '#5fd068', '#3fa7ff'][i]);
+    if (concept !== 'ghost') for (let i = 0; i < (u.delivery ?? 0); i++) scooter(b, dx - 2.4 - i * 1.55, 0.6, 0, ['#ff8fab', '#ffd23f', '#5fd068', '#3fa7ff'][i]);
     if (ex >= 1) awning(b, (dx + (-w / 2)) / 2, 2.45, 0.15, Math.max(1, dx - dw / 2 + w / 2 - 0.6), 0.9, r!.signColor);
     if (ex >= 1) for (let i = 0; i < 2; i++) planter(b, -w / 2 + 0.6 + i * 1.0, 1.1);
     if (ex >= 3) { nobori(b, w / 2 - 0.4, 1.0, '本格寿司', '#c9a227'); nobori(b, w / 2 + 0.4, 1.4, '大人気', '#e63946'); rb.box(0, h - 0.3, 0.12, w + 0.1, 0.25, 0.1, C.gold); b.box(0, gh - 0.25, 0.15, w, 0.12, 0.1, C.gold); }
     if (s.flags.chapter2 && p.kind === 'flagship') maneki(b, dx + dw / 2 + 1.6, 0, 0.9, 1.2);
   }
+
+  /** Street-side identity of each format. */
+  private formatFront(b: Builder, rb: Builder, s: GameState, r: RestaurantState, concept: string, h: number, gh: number): void {
+    const { w } = this.def, L = this.L!, dx = L.doorX, dw = 2.2;
+    if (concept === 'kaiten') {
+      const sw = Math.min(w - 2.6, 7);
+      rb.box(0.4, gh + 0.6, 0.3, sw + 0.3, 1.5, 0.2, '#1b1b22');
+      rb.add(G.box(sw + 0.12, 1.32, 0.04), '#ffd23f', { at: [0.4, gh + 0.69, 0.41], glow: '#ffcf3f' });
+      rb.sign(0.4, gh + 1.35, 0.44, sw - 0.2, 1.1, '回転寿司', { bg: '#d62839', fg: '#ffffff', px: 70, sub: 'KAITEN SUSHI · 1皿110円' });
+      for (let i = 0; i < 3; i++) rb.add(G.cyl(0.32, 0.32, 0.05, 18), ['#ffd23f', '#3a86ff', '#e63946'][i], { at: [0.4 - sw / 2 - 0.5 + (i === 2 ? sw + 1 : 0), gh + 1.0 + (i === 1 ? 0.7 : 0), 0.45], rot: [Math.PI / 2, 0, 0], glow: '#553311' });
+      nobori(b, w / 2 - 0.4, 1.0, '一皿百円', '#d62839'); nobori(b, -w / 2 + 0.4, 1.0, 'ファミリー', '#3a86ff');
+    } else if (concept === 'omakase') {
+      b.box(dx + dw / 2 + 0.7, 0, 0.35, 0.1, 1.7, 0.1, C.woodD);
+      b.sign(dx + dw / 2 + 0.7, 1.15, 0.42, 0.42, 1.0, '鮨', { bg: '#2a1d1a', fg: '#e9d3a8', vertical: true, px: 90 });
+      for (const sx of [-1, 1]) for (let k = 0; k < 8; k++) b.box(dx + sx * (dw / 2 + 1.6) + (k - 3.5) * 0.12, 0, 0.18, 0.06, 1.6, 0.06, '#7a9a4a'); // bamboo screen
+      b.box(dx, 0.01, 0.9, dw + 2.4, 0.03, 1.1, '#cfc8bc');
+      for (let k = 0; k < 3; k++) b.cyl(dx + (k - 1) * 0.6, 0.02, 0.9, 0.22, 0.24, 0.05, '#8e8a84', 10);
+      b.box(dx - dw / 2 - 1.1, 0, 0.6, 0.3, 0.25, 0.3, '#a99f91'); b.add(G.box(0.25, 0.25, 0.25), '#e8e0d0', { at: [dx - dw / 2 - 1.1, 0.25, 0.6], glow: '#ffcf70' }); b.add(hip(0.45, 0.45, 0.22), '#8e8a84', { at: [dx - dw / 2 - 1.1, 0.5, 0.6] });
+      b.collide(dx - dw / 2 - 1.1, 0.6, 0.35, 0.35, 0.75, false);
+    } else if (concept === 'kiosk') {
+      // takeout window with a pack chiller and a menu lightbox
+      const wx = dx + dw / 2 + Math.min(1.9, (w / 2 - dx - dw / 2) / 2 + 0.2);
+      b.box(wx, 1.0, 0.25, 2.2, 0.07, 0.5, '#ffffff'); b.box(wx, 0, 0.05, 2.2, 1.0, 0.12, '#2a9d8f'); b.collide(wx, 0.25, 2.2, 0.5, 1.05, false);
+      for (let i = 0; i < 6; i++) b.rbox(wx - 0.8 + (i % 3) * 0.8, 1.07, 0.18 + Math.floor(i / 3) * 0.18, 0.32, 0.07, 0.16, ['#ff8a5c', '#d9364a', '#5fae4b'][i % 3], 0.02);
+      const rect = this.atlas!.custom(384, 160, (c, x, y, ww, hh) => {
+        c.fillStyle = '#fffdf6'; c.fillRect(x, y, ww, hh); c.fillStyle = '#2a9d8f'; c.fillRect(x, y, ww, 30);
+        c.fillStyle = '#fff'; c.font = `700 22px ${FONT}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('持ち帰り TAKEOUT', x + ww / 2, y + 16);
+        const packs = [['にぎり', '#ff8a5c', 480], ['巻き', '#5fae4b', 320], ['特上', '#d9364a', 880]] as const;
+        packs.forEach(([n, col, pr], i) => {
+          const px = x + 20 + i * 122;
+          c.fillStyle = '#1d1d1d'; c.fillRect(px, y + 44, 100, 60); c.fillStyle = '#fff'; c.fillRect(px + 6, y + 50, 88, 48);
+          for (let k = 0; k < 4; k++) { c.fillStyle = col; c.beginPath(); c.ellipse(px + 18 + k * 21, y + 74, 9, 6, 0, 0, 7); c.fill(); }
+          c.fillStyle = '#1d1d1d'; c.font = `700 20px ${FONT}`; c.fillText(`${n} ¥${Math.round(pr * r.priceMult)}`, px + 50, y + 128);
+        });
+      });
+      b.box(wx, 2.35, 0.18, 2.5, 1.05, 0.12, '#1d1d24', '#3a3020');
+      b.panel(wx, 2.87, 0.25, 2.4, 1.0, rect);
+    } else if (concept === 'ghost') {
+      b.box(0, 2.62, 0.16, Math.min(w - 1, 6), 0.5, 0.06, '#1d1d24');
+      b.sign(0, 2.87, 0.2, Math.min(w - 1.2, 5.6), 0.44, 'DELIVERY ONLY · デリバリー専用', { bg: '#1d1d24', fg: '#7cff6b', px: 80 });
+      const n = Math.min(5, 3 + (r.upgrades.delivery ?? 0));
+      for (let i = 0; i < n; i++) scooter(b, dx - 2.2 - i * 1.55, 0.6, 0, ['#ff8fab', '#ffd23f', '#5fd068', '#3fa7ff', '#ff6b35'][i]);
+      b.box(dx - 2.2 - (n - 1) * 0.78, 0, 1.15, n * 1.55, 0.05, 0.08, '#9aa3ad'); // rack rail
+      // order-ready shelf at the pickup hatch
+      const sx = dx + dw / 2 + 0.9;
+      b.box(sx, 0, 0.35, 1.2, 1.7, 0.4, '#5c6470'); for (const y of [0.55, 1.1]) b.box(sx, y, 0.35, 1.25, 0.04, 0.42, '#c9ced4');
+      for (let i = 0; i < 4; i++) b.rbox(sx - 0.4 + (i % 3) * 0.4, i < 3 ? 0.59 : 1.14, 0.35, 0.3, 0.32, 0.25, i % 2 ? '#d9b48a' : '#ffffff', 0.03);
+      b.sign(sx, 1.85, 0.56, 1.2, 0.3, '受取 PICK-UP', { bg: '#7cff6b', fg: '#1d1d24', px: 100 });
+      b.collide(sx, 0.35, 1.2, 0.4, 1.7, false);
+    }
+  }
+
+  /** Interiors that are not the classic bar. */
+  private formatInterior(b: Builder, s: GameState, r: RestaurantState, th: typeof THEMES[number], L: ReturnType<typeof buildingLayout>, concept: string): void {
+    const { w, d } = this.def, u = r.upgrades;
+    const cw = L.counterX1 - L.counterX0;
+    const na = activeSeats(PROPERTIES[this.def.id].kind, u.seats ?? 0, this.site.seats.length);
+    const clearOfMenu = (x: number) => Math.abs(x - L.qx) > 1.2;
+    const stool = (i: number, h = 0.45, c = '#3b2a20') => { const sp = localOf(this.def, this.site.seats[i]); b.cyl(sp.x, 0, sp.z, 0.17, 0.15, h, c, 10); };
+    if (concept === 'kaiten') {
+      // belt loop on the counter + moving plates (instanced, animated in animate())
+      const x0 = L.counterX0 + 0.35, x1 = L.counterX1 - 0.35, zf = L.cz + 0.3, zb = L.cz - 0.12;
+      for (const z of [zf, zb]) b.box((x0 + x1) / 2, 1.08, z, x1 - x0 + 0.26, 0.05, 0.26, '#c9d1d9');
+      for (const x of [x0, x1]) b.box(x, 1.08, (zf + zb) / 2, 0.26, 0.05, zf - zb + 0.26, '#c9d1d9');
+      b.box((x0 + x1) / 2, 1.08, (zf + zb) / 2, x1 - x0 - 0.26, 0.06, zf - zb - 0.26, '#8d96a3');
+      const n = Math.max(8, Math.floor(((x1 - x0) * 2 + (zf - zb) * 2) / 0.5));
+      const plates = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.11, 0.09, 0.025, 14), new THREE.MeshStandardMaterial({ roughness: 0.4 }), n);
+      const sg = (makeSushi('salmon_nigiri').geometry as THREE.BufferGeometry).clone();
+      const sushi = new THREE.InstancedMesh(sg, (makeSushi('salmon_nigiri').material as THREE.Material), n);
+      for (let i = 0; i < n; i++) plates.setColorAt(i, PLATE_COLORS[i % PLATE_COLORS.length]);
+      plates.frustumCulled = sushi.frustumCulled = false;
+      const frame = new THREE.Group(); frame.position.set(this.def.x, 0, this.def.z); frame.rotation.y = this.def.ry;
+      frame.add(plates, sushi); this.group.add(frame);
+      this.belt = { plates, sushi, x0, x1, zf, zb, t: 0 };
+      this.animate(0);
+      b.box(w / 2 - 0.15, 1.6, -d * 0.45, 0.06, 0.9, 2.6, '#14141f', '#2a0f20');
+      b.sign(w / 2 - 0.19, 2.05, -d * 0.45, 2.4, 0.75, '回転寿司', { bg: '#14141f', fg: '#ff4f9a', px: 80, ry: -Math.PI / 2 });
+      for (let x = -w / 2 + 1.5; x < w / 2 - 1; x += 2.5) for (let z = -1.5; z > -d + 3.5; z -= 2.8) if (clearOfMenu(x)) { b.add(G.cyl(0.01, 0.01, 0.7, 4), '#222', { at: [x, 2.9, z] }); b.add(G.cyl(0.24, 0.24, 0.12, 14), '#ffffff', { at: [x, 2.8, z], glow: '#fff6e6' }); }
+      for (let i = 0; i < 5; i++) b.cyl(L.counterX0 + 0.3 + i * 0.16, 1.11, L.cz - 0.32, 0.11, 0.11, 0.1 + i * 0.03, PLATE_COLORS[i % 6].getStyle() === 'rgb(255,255,255)' ? '#ffffff' : '#e9ecef', 12);
+      this.tables(b, th, true, '#d62839');
+    } else if (concept === 'omakase') {
+      for (let k = 0; k < Math.floor(w / 0.35); k++) b.box(-w / 2 + 0.2 + k * 0.35, 0.05, -d + 0.15, 0.12, 3.3, 0.04, '#8a6a4a');
+      b.box(-w / 2 + 0.16, 0.9, -d * 0.55, 0.03, 1.9, 0.75, '#f6efe0');
+      b.sign(-w / 2 + 0.19, 1.85, -d * 0.55, 0.62, 1.6, '一期一会', { bg: '#f6efe0', fg: '#1d1d1d', vertical: true, px: 80, ry: Math.PI / 2 });
+      b.cyl(w / 2 - 0.8, 0, -1.2, 0.22, 0.18, 0.6, '#2d2d33', 12);
+      for (let i = 0; i < 5; i++) b.add(G.cyl(0.015, 0.015, 0.9 + i * 0.12, 4), '#5c7a3a', { at: [w / 2 - 0.8 + (i - 2) * 0.06, 0.6, -1.2], rot: [0, 0, (i - 2) * 0.15] });
+      b.box((L.counterX0 + L.counterX1) / 2, 3.18, L.cz - 0.1, cw, 0.06, 0.1, '#1d1d1d');
+      for (let x = L.counterX0 + 0.8; x < L.counterX1; x += 1.2) if (clearOfMenu(x)) { b.box(x, 3.0, L.cz - 0.1, 0.03, 0.18, 0.03, '#1d1d1d'); b.add(G.cone(0.1, 0.2, 10), '#1d1d1d', { at: [x, 3.0, L.cz - 0.1], rot: [Math.PI, 0, 0], glow: '#ffe2b0' }); }
+      noren(b, -w / 2 + 1.6, 2.3, -d + 0.2, 1.2, '#2a1d1a', '厨');
+      b.box(-w / 2 + 1.6, 0.05, -d + 0.14, 1.2, 2.3, 0.04, '#1d1612');
+      for (let i = 0; i < Math.min(na, this.site.seats.length); i++) stool(i, 0.5, '#2a1f1a');
+      for (let x = L.counterX0 + 0.6; x < L.counterX1; x += 1.4) b.box(x, 1.13, L.cz + 0.3, 0.26, 0.015, 0.2, '#7aa35a'); // leaf plates per guest
+      b.pool(L.qx, L.cz + 0.6, 2.6, '#ffcf8a');
+    } else if (concept === 'kiosk') {
+      b.box(-w / 2 + 0.3, 0, (-1.2 + L.cz + 2.0) / 2, 0.35, 0.78, -1.2 - L.cz - 2.0 + 0.6, '#d9d2c3'); // wall ledge
+      b.collide(-w / 2 + 0.3, (-1.2 + L.cz + 2.0) / 2, 0.35, -1.2 - L.cz - 2.0 + 0.6, 0.8, false);
+      for (const [a, c] of [[-w / 2 + 0.4, L.doorX - 1.2], [L.doorX + 1.2, w / 2 - 1.4]]) if (c - a > 0.5) { b.box((a + c) / 2, 0, -0.3, c - a, 0.78, 0.3, '#d9d2c3'); b.collide((a + c) / 2, -0.3, c - a, 0.3, 0.8, false); }
+      for (let i = 0; i < Math.min(na, this.site.seats.length); i++) stool(i, 0.45, '#2a9d8f');
+      b.box(w / 2 - 0.35, 0, -2.4, 0.5, 1.9, 1.8, '#d9dde2'); b.add(G.box(0.04, 1.6, 1.6), '#dff3ff', { at: [w / 2 - 0.6, 0.15, -2.4], glass: true });
+      for (let k = 0; k < 4; k++) for (let j = 0; j < 4; j++) b.rbox(w / 2 - 0.4, 0.25 + k * 0.4, -3.0 + j * 0.4, 0.3, 0.08, 0.3, ['#ff8a5c', '#5fae4b', '#d9364a', '#ffd23f'][(k + j) % 4], 0.02);
+      b.collide(w / 2 - 0.35, -2.4, 0.5, 1.8, 1.9, false);
+      for (let x = -w / 2 + 1.5; x < w / 2 - 1; x += 2.5) if (clearOfMenu(x)) b.box(x, 3.38, -d * 0.4, 1.4, 0.05, 0.5, '#ffffff', '#fff6e6'); // flush ceiling panels
+    } else if (concept === 'ghost') {
+      // kitchen only: steel racks of delivery bags, order tablets, stacked boxes
+      for (const sx of [-1, 1]) {
+        const x = sx * (w / 2 - 0.4);
+        for (const zz of [-1.15, 1.15]) for (const xx of [-0.22, 0.22]) b.box(x + xx, 0, -d * 0.45 + zz, 0.04, 1.9, 0.04, '#8d96a3'); // open rack
+        for (const y of [0.1, 0.62, 1.14, 1.66]) b.box(x, y, -d * 0.45, 0.5, 0.03, 2.4, '#b8c0ca');
+        for (const y of [0.13, 0.65, 1.17]) for (let k = 0; k < 4; k++) b.rbox(x, y, -d * 0.45 - 0.9 + k * 0.6, 0.34, 0.32, 0.4, k % 2 ? '#d9b48a' : '#ffffff', 0.03);
+        b.collide(x, -d * 0.45, 0.5, 2.4, 1.9, false);
+      }
+      for (let i = 0; i < 3; i++) b.box(L.counterX0 + 0.6 + i * 0.45, 1.08, L.cz + 0.1, 0.32, 0.22, 0.03, '#1d1d24', i === 1 ? '#7cff6b' : '#3a86ff');
+      b.box(w / 2 - 0.14, 2.2, -d * 0.2, 0.06, 0.6, 2.6, '#1d1d24');
+      b.sign(w / 2 - 0.18, 2.5, -d * 0.2, 2.4, 0.5, '注文 ORDERS · 出前', { bg: '#1d1d24', fg: '#7cff6b', px: 80, ry: -Math.PI / 2 });
+      for (let x = -w / 2 + 1.5; x < w / 2 - 1; x += 2.5) if (clearOfMenu(x)) b.box(x, 3.38, -d * 0.45, 1.6, 0.05, 0.4, '#ffffff', '#eef6ff'); // flush ceiling panels
+    }
+  }
+
+  /** Tables & stools for active seats (classic bar / kaiten). */
+  private tables(b: Builder, th: typeof THEMES[number], tablets: boolean, stoolColor: string): void {
+    const seats = this.site.seats;
+    const na = activeSeats(PROPERTIES[this.def.id].kind, this.lastUpgrades.seats ?? 0, seats.length);
+    for (let t = 0; t * 2 < seats.length; t++) {
+      if (2 * t >= na) continue;
+      const a = localOf(this.def, seats[2 * t]), c = localOf(this.def, seats[2 * t + 1]);
+      const tx = (a.x + c.x) / 2, tz = (a.z + c.z) / 2;
+      b.rbox(tx, 0, tz, 0.15, 0.7, 0.15, th.accent, 0.03);
+      b.rbox(tx, 0.7, tz, 0.8, 0.06, 0.75, th.counter, 0.03);
+      b.collide(tx, tz, 0.8, 0.75, 0.76, false);
+      b.cyl(tx, 0.76, tz, 0.04, 0.04, 0.1, '#c0392b', 6);
+      if (tablets) b.box(tx + 0.25, 0.76, tz - 0.25, 0.22, 0.16, 0.03, '#1d1d24', '#3a86ff');
+      for (const sp of [a, c]) b.cyl(sp.x, 0, sp.z, 0.19, 0.16, 0.45, stoolColor, 10);
+    }
+  }
+  private lastUpgrades: Record<string, number> = {};
 
   /** Chalkboard / wooden menu with Japanese item names and live prices. */
   private menuRect(s: GameState, r: RestaurantState): [number, number, number, number] {
@@ -401,12 +590,14 @@ export class SiteView {
       const x = L.prepX - 2.2 - i * 1.7;
       this.prepGear(b, x > -w / 2 + 0.8 ? x : L.prepX + 2.2 + (i - 1) * 1.7, 0.98, -d + 0.4, 0, true);
     }
-    if (u.fridge || lux) this.netaCase(b, L.qx + 1.3, lux ? 1.12 : 1.08, L.cz - 0.05, Math.min(cw - 3, (lux ? 2.4 : 1.2) + (u.fridge ?? 0) * 1.0));
-    if (u.register) b.rbox(L.counterX1 - 0.4, 1.08, L.cz + 0.1, 0.4, 0.25, 0.32, u.register >= 3 ? C.gold : '#4a4e58', 0.04);
+    const concept = r.concept ?? 'bar';
+    if ((u.fridge || lux || concept === 'omakase') && concept !== 'kaiten') this.netaCase(b, L.qx + 1.3, lux || concept === 'omakase' ? 1.12 : 1.08, L.cz - 0.05, Math.min(cw - 3, (lux || concept === 'omakase' ? 2.4 : 1.2) + (u.fridge ?? 0) * 1.0));
+    if (concept !== 'kaiten' && u.register) b.rbox(L.counterX1 - 0.4, 1.08, L.cz + 0.1, 0.4, 0.25, 0.32, u.register >= 3 ? C.gold : '#4a4e58', 0.04);
     // painted menu board with live prices
     b.box(L.qx, 1.45, -d + 0.15, 1.75, 2.15, 0.05, C.woodD);
     b.panel(L.qx, 2.52, -d + 0.19, 1.6, 2.0, this.menuRect(s, r));
-    // per-district character
+    if (concept !== 'bar') { this.formatInterior(b, s, r, th, L, concept); return; }
+    // per-district character (classic bar)
     if (style === 'wood') {
       // noren over the kitchen doorway, hanging wooden menu tags, paper lanterns, kamidana, sake barrels
       b.box(-w / 2 + 1.6, 0.05, -d + 0.14, 1.2, 2.3, 0.04, '#3a2a22');
@@ -444,17 +635,9 @@ export class SiteView {
       for (let x = -w / 2 + 1.5; x < w / 2 - 1; x += 1.8) if (clearOfMenu(x)) for (const z of [L.cz + 0.15, -d * 0.4]) { b.add(G.cyl(0.008, 0.008, 0.8, 4), '#222', { at: [x, 2.65, z] }); b.add(G.sphere(0.09, 8, 6), '#fff3d0', { at: [x, 2.6, z], glow: '#ffd27a' }); }
       for (let i = 0; i < 2; i++) b.cyl(L.counterX0 + 0.5 + i * 0.4, 1.08, L.cz + 0.1, 0.11, 0.11, 0.38, '#c0c6cc', 12); // tea urns
     } else if (modern) {
-      // kaiten conveyor loop along the counter front, plates riding it; wall neon; panel lights
-      b.box(cx, 1.08, L.cz + 0.3, cw - 0.2, 0.06, 0.32, '#c9d1d9');
-      b.box(cx, 1.12, L.cz + 0.3, cw - 0.25, 0.02, 0.28, '#e9eef2');
-      const n = Math.floor((cw - 0.6) / 0.42);
-      for (let i = 0; i < n; i++) {
-        const px = L.counterX0 + 0.5 + i * 0.42;
-        b.cyl(px, 1.14, L.cz + 0.3, 0.13, 0.11, 0.025, ['#ffffff', '#ffd23f', '#e63946', '#3a86ff', '#1d1d1d'][i % 5], 12);
-        if (i % 3 !== 2) b.add(makeSushiGeo(), '#ff8a5c', { at: [px, 1.165, L.cz + 0.3], rot: [0, Math.PI / 2, 0], scale: [0.8, 0.8, 0.8] });
-      }
+      // bright city sushi bar: wall neon, panel pendants, order tablets
       b.box(w / 2 - 0.15, 1.6, -d * 0.45, 0.06, 0.9, 2.6, '#14141f', '#2a0f20');
-      b.sign(w / 2 - 0.19, 2.05, -d * 0.45, 2.4, 0.75, '回転寿司', { bg: '#14141f', fg: '#ff4f9a', px: 80, ry: -Math.PI / 2 });
+      b.sign(w / 2 - 0.19, 2.05, -d * 0.45, 2.4, 0.75, '寿司 SUSHI', { bg: '#14141f', fg: '#ff4f9a', px: 80, ry: -Math.PI / 2 });
       for (let x = -w / 2 + 1.5; x < w / 2 - 1; x += 2.5) for (let z = -1.5; z > -d + 3.5; z -= 2.8) if (clearOfMenu(x)) { b.add(G.cyl(0.01, 0.01, 0.7, 4), '#222', { at: [x, 2.9, z] }); b.add(G.cyl(0.22, 0.22, 0.12, 14), '#ffffff', { at: [x, 2.8, z], glow: '#fff6e6' }); }
       for (let i = 0; i < 4; i++) b.cyl(L.counterX0 + 0.4 + i * 0.15, 1.08, L.cz - 0.15, 0.12, 0.12, 0.12 + i * 0.02, '#e9ecef', 12); // plate stack
     } else {
