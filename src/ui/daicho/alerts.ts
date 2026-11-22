@@ -2,10 +2,10 @@
 // Slips are keyed by alert.id, built once and patched per snapshot. Acting on a slip stamps it 済 (fix) or 掟 (rule)
 // when the alert disappears from the next snapshot. Snooze lives in this part's memory only.
 import { unlockDistrict } from '../../core/actions';
-import { AREAS, PROPERTIES } from '../../core/data';
+import { AREAS, INGREDIENTS, IngredientId, PROPERTIES } from '../../core/data';
 import { Alert, Severity, applyFix, applyRule } from '../../core/empire';
 import { yen } from '../../core/format';
-import { run } from '../dom';
+import { esc, ingIcon, run } from '../dom';
 import './alerts.css';
 import { Ctx, Part, Snap } from './shared';
 
@@ -20,11 +20,16 @@ const RESTOCK_NOTE = 'Restocking runs itself once you research Scheduled Deliver
 
 interface Slip {
   a: Alert; el: HTMLElement; sevGlyph: HTMLElement; sevWord: HTMLElement;
-  txt: HTMLElement; pre: HTMLElement; who: HTMLButtonElement; post: HTMLElement;
+  txt: HTMLElement; ings: HTMLElement; pre: HTMLElement; who: HTMLButtonElement; post: HTMLElement;
   fix: HTMLButtonElement; alt: HTMLButtonElement; rule: HTMLButtonElement; note: HTMLElement;
   stamping: boolean;
 }
 
+/** "rice, nori and cucumber" */
+const listOf = (ids: IngredientId[]) => {
+  const n = ids.map((i) => INGREDIENTS[i].name.toLowerCase());
+  return n.length > 1 ? `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}` : n[0] ?? '';
+};
 const set = (e: HTMLElement, text: string) => { if (e.textContent !== text) e.textContent = text; };
 const btn = (cls: string, text: string) => {
   const b = document.createElement('button');
@@ -133,12 +138,13 @@ export class AlertRail implements Part {
     const p = document.createElement('p'); p.className = 'dc-al-txt';
     const pre = document.createElement('span'), post = document.createElement('span');
     const who = btn('dc-al-who', '');
-    p.append(pre, who, post);
+    const ings = document.createElement('span'); ings.className = 'dc-al-ings';
+    p.append(ings, pre, who, post);
     const note = document.createElement('p'); note.className = 'dc-al-note'; note.hidden = true; note.textContent = RESTOCK_NOTE;
     note.setAttribute('role', 'note');
     body.append(head, p, note);
     el.append(tab, body);
-    const slip: Slip = { a, el, sevGlyph: tab, sevWord, txt: p, pre, who, post, fix, alt, rule, note, stamping: false };
+    const slip: Slip = { a, el, sevGlyph: tab, sevWord, txt: p, ings, pre, who, post, fix, alt, rule, note, stamping: false };
 
     const { store } = this.ctx;
     const hoverOn = () => { if (slip.a.restIds.length === 1) store.set({ hover: slip.a.restIds[0] }); };
@@ -187,9 +193,20 @@ export class AlertRail implements Part {
     if (slip.el.dataset.sev !== a.severity) slip.el.dataset.sev = a.severity;
     set(slip.sevGlyph, sev.glyph);
     set(slip.sevWord, sev.word);
-    const label = `${sev.word}: ${a.text}`;
+    // stock: "Low on 🍚 Rice · Nori +k" from a.ingredients (what the restock fix buys); the core text's list is cut at 3 + "…"
+    const ingIds = a.ingredients ?? [];
+    const k = ingIds.join(',');
+    if (slip.ings.dataset.k !== k) {
+      slip.ings.dataset.k = k;
+      slip.ings.innerHTML = ingIds.length ? 'Low on ' + ingIds.slice(0, 3).map((i) => `<span class="dc-al-ing"><span aria-hidden="true">${ingIcon(i)}</span> ${esc(INGREDIENTS[i].name)}</span>`).join(' · ')
+        + (ingIds.length > 3 ? ` <span class="dc-al-ingk">+${ingIds.length - 3}</span>` : '') : '';
+    }
+    const colon = a.text.indexOf(': ');
+    const rest = ingIds.length && colon >= 0 ? a.text.slice(colon) : a.text; // the text after the icon list
+    const full = ingIds.length ? `Low on ${listOf(ingIds)}${rest}` : a.text;
+    const label = `${sev.word}: ${full}`;
     if (slip.el.getAttribute('aria-label') !== label) slip.el.setAttribute('aria-label', label);
-    if (slip.txt.title !== a.text) slip.txt.title = a.text;
+    if (slip.txt.title !== full) slip.txt.title = full;
 
     // restaurant(s): the text starts with the name / "N restaurants" — make that prefix the button
     const s = this.ctx.host.s;
@@ -199,8 +216,8 @@ export class AlertRail implements Part {
     set(slip.who, whoText);
     const aria = n === 1 ? `Open ${whoText}` : `Select these ${n} restaurants in the ledger`;
     if (whoText && slip.who.getAttribute('aria-label') !== aria) slip.who.setAttribute('aria-label', aria);
-    if (whoText && a.text.startsWith(whoText)) { set(slip.pre, ''); set(slip.post, a.text.slice(whoText.length)); }
-    else { set(slip.pre, whoText ? `${a.text} ` : a.text); set(slip.post, ''); }
+    if (whoText && rest.startsWith(whoText)) { set(slip.pre, ''); set(slip.post, rest.slice(whoText.length)); }
+    else { set(slip.pre, whoText ? `${rest} ` : rest); set(slip.post, ''); }
 
     // primary: the alert's fix, else buy the lot, else show the new area on the map
     const lot = a.propId ? PROPERTIES[a.propId] : undefined, area = a.areaId ? AREAS[a.areaId] : undefined;
@@ -208,7 +225,9 @@ export class AlertRail implements Part {
       : lot ? `Pick a concept · ${lot.name}` : area ? 'Show on map' : '';
     slip.fix.hidden = !fixText;
     set(slip.fix, fixText);
-    if (slip.fix.title !== fixText) slip.fix.title = fixText; // may ellipsize in a narrow slip
+    const fixLong = a.fix?.id === 'restock' && ingIds.length ? `Restock ${listOf(ingIds)} for 1 day, ${yen(a.fix.cost)}` : fixText;
+    if (slip.fix.title !== fixLong) slip.fix.title = fixLong; // may ellipsize in a narrow slip
+    if (slip.fix.getAttribute('aria-label') !== fixLong) slip.fix.setAttribute('aria-label', fixLong);
     slip.fix.classList.toggle('poor', s.cash < (a.fix?.cost ?? lot?.price ?? 0));
     slip.fix.classList.toggle('gold', !a.fix && !!fixText); // growth actions in kin, not shu
     slip.alt.hidden = !area;

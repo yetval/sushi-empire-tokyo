@@ -619,3 +619,7 @@ table.books tfoot td { border-top: 2px solid var(--sumi); font-weight: 900; }
 
 /* disabled always wins over colour variants (they were declared after .btn:disabled) */
 .btn.blue:disabled, .btn.gold:disabled, .btn.green:disabled, .btn.poor:disabled { background: var(--grain), #b8ab98; border-color: #9a8e7e; color: #3f362f; cursor: not-allowed; box-shadow: 0 2px 0 #9a8e7e; }
+
+/* each window is its own stacking context: dashboard tooltips/sticky rows never paint over a sheet or dialog */
+.modal { isolation: isolate; }
+.modal.closing { pointer-events: none; }

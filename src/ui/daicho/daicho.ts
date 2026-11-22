@@ -15,6 +15,7 @@ export class Daicho {
   private readonly parts: Part[];
   private acc = 0;
   private last!: Snap;
+  private readonly contain = (e: Event) => e.stopPropagation();
   private readonly onKey = (e: KeyboardEvent) => {
     // game.ts ignores 1/2/3 while Manage is open (input disabled), so the dashboard handles speed keys itself
     const t = e.target as HTMLElement;
@@ -44,6 +45,9 @@ export class Daicho {
     strip.el.classList.add('dc-a-strip'); map.el.classList.add('dc-a-map'); ledger.el.classList.add('dc-a-ledger'); rail.el.classList.add('dc-a-rail');
     this.el.append(strip.el, map.el, ledger.el, rail.el);
     this.el.addEventListener('keydown', this.onKey);
+    // The host's delegated handlers (Manage: data-act/data-in on its body) must never see our events:
+    // e.g. a map lot's data-act="buy" was also firing Manage's ingredient-buy. Our own handlers live below this root.
+    for (const t of ['click', 'input', 'change'] as const) this.el.addEventListener(t, this.contain);
     for (const p of this.parts) p.render(this.last);
   }
 
@@ -61,6 +65,7 @@ export class Daicho {
 
   destroy(): void {
     this.el.removeEventListener('keydown', this.onKey);
+    for (const t of ['click', 'input', 'change'] as const) this.el.removeEventListener(t, this.contain);
     for (const p of this.parts) p.destroy();
     this.el.remove();
   }
