@@ -111,3 +111,19 @@ describe('tycoon review A regressions', () => {
     expect(sim.dailyCosts(s).wages).toBe(full);
   });
 });
+
+describe('tycoon review B regressions', () => {
+  it('restock fix buys only the low ingredients and charges what it shows', () => {
+    s.cash = 1e6;
+    E.hireBest(s, 'asakusa_stand', 'chef'); E.hireBest(s, 'asakusa_stand', 'server');
+    for (const k of Object.keys(s.inventory)) (s.inventory as any)[k] = 500;
+    s.inventory.salmon = 0;
+    const a = E.alerts(s).find((x) => x.id === 'stock')!;
+    expect(a.ingredients).toEqual(['salmon']);
+    const before = s.cash, rice = s.inventory.rice;
+    expect(E.applyFix(s, a)).toBeNull();
+    expect(Math.abs(before - s.cash - a.fix!.cost)).toBeLessThanOrEqual(2);
+    expect(s.inventory.rice).toBe(rice);
+    expect(E.alerts(s).some((x) => x.id === 'stock')).toBe(false);
+  });
+});

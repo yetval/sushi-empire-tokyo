@@ -8,6 +8,8 @@ import * as sim from './sim';
 import { GameState, RestDay } from './state';
 
 const PIECES_PER_GUEST = 3;
+/** Smart-pricing range (house rule). Alerts only offer the rule when it can actually clear them. */
+export const AUTO_PRICE_MIN = 0.9, AUTO_PRICE_MAX = 1.6;
 
 // ---------------------------------------------------------------- KPIs
 export interface RestKPI {
@@ -106,14 +108,19 @@ export interface Alert {
   rule?: 'autoHire' | 'autoPrice' | 'autoRestock'; // the house rule that would prevent this
   propId?: string; // opportunity: the lot to buy (UI opens the buy dialog)
   areaId?: string; // opportunity: the area to unlock (UI opens the map there)
+  ingredients?: IngredientId[]; // stock alerts: exactly what the restock fix buys
 }
 
 const names = (s: GameState, ids: string[]) => ids.length === 1 ? s.restaurants[ids[0]].name : `${ids.length} restaurants`;
 
-function bestCandidateCost(s: GameState, role: Role): number {
-  const c = s.candidates.filter((e) => e.role === role).sort((a, b) => b.skill - a.skill)[0];
-  return c ? sim.hireCost(c) : ROLES[role].hireCost;
+/** Cost of hiring n people of a role the way hireBest will: best candidates first, then fresh ones (priced at max skill). */
+function hireCostFor(s: GameState, role: Role, n: number): number {
+  const pool = s.candidates.filter((e) => e.role === role).sort((a, b) => b.skill - a.skill);
+  let cost = 0;
+  for (let i = 0; i < n; i++) cost += pool[i] ? sim.hireCost(pool[i]) : Math.round(ROLES[role].hireCost * 2.2);
+  return cost;
 }
+const bestCandidateCost = (s: GameState, role: Role) => hireCostFor(s, role, 1);
 
 /** Current alerts, grouped so 20 restaurants with the same problem become one slip. Sorted by severity. */
 export function alerts(s: GameState): Alert[] {
@@ -124,26 +131,30 @@ export function alerts(s: GameState): Alert[] {
 
   const unstaffed = group((x) => !x.automated && !playerHere(x.id));
   if (unstaffed.length) {
-    const cost = unstaffed.reduce((a, id) => a + (sim.staffAt(s, id, 'chef').length ? 0 : bestCandidateCost(s, 'chef')) + (sim.conceptOf(s, id).needsServer && !sim.staffAt(s, id, 'server').length && !sim.staffAt(s, id, 'manager').length ? bestCandidateCost(s, 'server') : 0), 0);
+    const chefs = unstaffed.filter((id) => !sim.staffAt(s, id, 'chef').length).length;
+    const servers = unstaffed.filter((id) => sim.conceptOf(s, id).needsServer && !sim.staffAt(s, id, 'server').length && !sim.staffAt(s, id, 'manager').length).length;
+    const cost = hireCostFor(s, 'chef', chefs) + hireCostFor(s, 'server', servers);
     out.push({ id: 'unstaffed', severity: 'critical', kind: 'staff', restIds: unstaffed, text: `${names(s, unstaffed)} ${unstaffed.length === 1 ? 'has' : 'have'} no kitchen crew and earn nothing.`, fix: { id: 'hireMissing', label: 'Hire crew', cost }, rule: 'autoHire' });
   }
   const use = ingredientUsePerSec(s);
   const low = INGREDIENT_IDS.filter((i) => use[i] > 0 && s.inventory[i] / (use[i] * DAY_SECONDS) < 0.35);
   if (low.length && !sim.autoRestockOn(s)) {
-    const cost = Math.round(low.reduce((a, i) => a + use[i] * DAY_SECONDS * sim.ingredientPrice(s, i), 0));
-    out.push({ id: 'stock', severity: low.some((i) => s.inventory[i] < 5) ? 'critical' : 'warning', kind: 'stock', restIds: group((x) => x.stockDays < 0.35), text: `Low on ${low.map((i) => INGREDIENTS[i].name.toLowerCase()).slice(0, 3).join(', ')}${low.length > 3 ? '…' : ''}: kitchens will stall.`, fix: { id: 'restock', label: 'Restock 1 day', cost }, rule: 'autoRestock' });
+    const cost = Math.round(low.reduce((a, i) => a + Math.max(0, Math.ceil(use[i] * DAY_SECONDS) - s.inventory[i]) * sim.ingredientPrice(s, i) * 1.08, 0));
+    out.push({ id: 'stock', severity: low.some((i) => s.inventory[i] < 5) ? 'critical' : 'warning', kind: 'stock', restIds: group((x) => x.stockDays < 0.35), text: `Low on ${low.map((i) => INGREDIENTS[i].name.toLowerCase()).slice(0, 3).join(', ')}${low.length > 3 ? '…' : ''}: kitchens will stall.`, fix: { id: 'restock', label: 'Restock 1 day', cost }, rule: 'autoRestock', ingredients: low });
   }
   const overloaded = group((x) => x.automated && x.load > 1.25);
   if (overloaded.length) {
     const canHire = overloaded.filter((id) => sim.staffAt(s, id, 'chef').length < sim.slotsFor(s, id, 'chef'));
     out.push(canHire.length
-      ? { id: 'overload', severity: 'warning', kind: 'load', restIds: overloaded, text: `${names(s, overloaded)}: kitchen overloaded, guests walk away.`, fix: { id: 'hireChef', label: 'Hire a chef each', cost: canHire.length * bestCandidateCost(s, 'chef') }, rule: 'autoHire' }
-      : { id: 'overload', severity: 'opportunity', kind: 'load', restIds: overloaded, text: `${names(s, overloaded)}: full kitchen and still turning guests away. Raise prices.`, fix: { id: 'priceUp', label: 'Prices +10%', cost: 0 }, rule: 'autoPrice' });
+      ? { id: 'overload', severity: 'warning', kind: 'load', restIds: overloaded, text: `${names(s, overloaded)}: kitchen overloaded, guests walk away.`, fix: { id: 'hireChef', label: 'Hire a chef each', cost: hireCostFor(s, 'chef', canHire.length) }, rule: 'autoHire' }
+      : { id: 'overload', severity: 'opportunity', kind: 'load', restIds: overloaded, text: `${names(s, overloaded)}: full kitchen and still turning guests away. Raise prices.`,
+          ...(overloaded.some((id) => s.restaurants[id].priceMult < 2.45) ? { fix: { id: 'priceUp' as FixId, label: 'Prices +10%', cost: 0 } } : {}),
+          ...(overloaded.some((id) => s.restaurants[id].priceMult < AUTO_PRICE_MAX) ? { rule: 'autoPrice' as const } : {}) });
   }
-  const idle = group((x) => x.automated && x.load < 0.45 && s.restaurants[x.id].priceMult > 0.85);
+  const idle = group((x) => x.automated && x.load < 0.45 && s.restaurants[x.id].priceMult > AUTO_PRICE_MIN + 0.01); // smart pricing can clear it
   if (idle.length) out.push({ id: 'idle', severity: 'opportunity', kind: 'load', restIds: idle, text: `${names(s, idle)}: kitchens mostly idle. Lower prices or market to fill seats.`, fix: { id: 'priceDown', label: 'Prices −10%', cost: 0 }, rule: 'autoPrice' });
   const dirty = group((x) => x.cleanliness < 0.5 && sim.staffAt(s, x.id, 'cleaner').length === 0);
-  if (dirty.length) out.push({ id: 'dirty', severity: 'warning', kind: 'clean', restIds: dirty, text: `${names(s, dirty)} ${dirty.length === 1 ? 'is' : 'are'} getting grubby. Guests notice.`, fix: { id: 'hireCleaner', label: 'Hire cleaners', cost: dirty.length * bestCandidateCost(s, 'cleaner') }, rule: 'autoHire' });
+  if (dirty.length) out.push({ id: 'dirty', severity: 'warning', kind: 'clean', restIds: dirty, text: `${names(s, dirty)} ${dirty.length === 1 ? 'is' : 'are'} getting grubby. Guests notice.`, fix: { id: 'hireCleaner', label: 'Hire cleaners', cost: hireCostFor(s, 'cleaner', dirty.length) }, rule: 'autoHire' });
   const losing = group((x) => x.profitYesterday !== null && x.profitYesterday < 0);
   if (losing.length) out.push({ id: 'loss', severity: 'warning', kind: 'money', restIds: losing, text: `${names(s, losing)} lost money yesterday. Check staffing, prices and format.` });
   const lots = Object.values(PROPERTIES).filter((p) => !s.restaurants[p.id] && s.districts.includes(p.district)).sort((a, b) => a.price - b.price);
@@ -175,7 +186,7 @@ export function applyFix(s: GameState, a: Alert): string | null {
         if (!sim.staffAt(s, id, 'chef').length) err = hireBest(s, id, 'chef', true) ?? err;
         if (sim.conceptOf(s, id).needsServer && !sim.staffAt(s, id, 'server').length && !sim.staffAt(s, id, 'manager').length) err = hireBest(s, id, 'server', true) ?? err;
         break;
-      case 'hireChef': err = hireBest(s, id, 'chef', true) ?? err; break;
+      case 'hireChef': if (sim.staffAt(s, id, 'chef').length < sim.slotsFor(s, id, 'chef')) err = hireBest(s, id, 'chef', true) ?? err; break;
       case 'hireCleaner': err = hireBest(s, id, 'cleaner', true) ?? err; break;
       case 'priceUp': A.setPrice(s, id, s.restaurants[id].priceMult * 1.1); break;
       case 'priceDown': A.setPrice(s, id, s.restaurants[id].priceMult / 1.1); break;
@@ -183,14 +194,17 @@ export function applyFix(s: GameState, a: Alert): string | null {
   }
   if (a.fix.id === 'restock') {
     const use = ingredientUsePerSec(s);
-    for (const i of INGREDIENT_IDS) if (use[i] > 0) sim.buyIngredient(s, i, Math.ceil(use[i] * DAY_SECONDS) - s.inventory[i], true);
+    for (const i of a.ingredients ?? []) {
+      const want = Math.ceil(use[i] * DAY_SECONDS) - s.inventory[i];
+      if (want > 0 && sim.buyIngredient(s, i, want, true) < want) err = 'Could not buy a full day (cash or storage)';
+    }
   }
   if (!err) toast(`✅ ${a.fix.label}: done at ${Math.max(1, a.restIds.length)} restaurant${a.restIds.length === 1 ? '' : 's'}`, 'good');
   return err;
 }
 
 // ---------------------------------------------------------------- house rules (policies)
-let lastHour = -1;
+const lastHour = new WeakMap<GameState, number>(); // per save: a new game/load never skips an hour
 const receipt = (s: GameState, id: string, text: string) => {
   const r = s.restaurants[id];
   r.log.push(text);
@@ -200,8 +214,8 @@ const receipt = (s: GameState, id: string, text: string) => {
 /** Run house rules once per in-game hour. Call every frame after sim.tick. */
 export function tickEmpire(s: GameState): void {
   const hour = Math.floor(s.minute / 60);
-  if (hour === lastHour) return;
-  lastHour = hour;
+  if (hour === lastHour.get(s)) return;
+  lastHour.set(s, hour);
   for (const r of Object.values(s.restaurants)) {
     if (!A.canUsePolicies(s, r.id)) continue;
     if (r.policy.autoHire) autoHire(s, r.id);
@@ -210,9 +224,9 @@ export function tickEmpire(s: GameState): void {
 }
 
 function affordable(s: GameState, role: Role): boolean {
-  // keep a cushion of three days of wages + rent before hiring automatically
+  // keep a cushion of one full day of wages + rent before hiring automatically
   const { wages, rent } = sim.dailyCosts(s);
-  return s.cash > bestCandidateCost(s, role) + 3 * (wages + rent) / 4;
+  return s.cash > bestCandidateCost(s, role) + (wages + rent);
 }
 
 function autoHire(s: GameState, id: string): void {
@@ -240,8 +254,8 @@ function autoPrice(s: GameState, id: string): void {
   const load = demandPPS(s, id) / cap;
   const before = r.priceMult;
   // conservative band: never prices below 90% or above 160% on its own
-  if (load > 1.15 && r.priceMult < 1.6) A.setPrice(s, id, r.priceMult + 0.05);
-  else if (load < 0.6 && r.priceMult > 0.9) A.setPrice(s, id, r.priceMult - 0.05);
+  if (load > 1.15 && r.priceMult < AUTO_PRICE_MAX) A.setPrice(s, id, r.priceMult + 0.05);
+  else if (load < 0.6 && r.priceMult > AUTO_PRICE_MIN) A.setPrice(s, id, r.priceMult - 0.05);
   if (r.priceMult !== before) receipt(s, id, `Prices ${r.priceMult > before ? 'up' : 'down'} to ${Math.round(r.priceMult * 100)}%`);
 }
 
