@@ -47,7 +47,7 @@ describe('tycoon: areas, concepts, many restaurants', () => {
     expect(A.buyProperty(s, 'asakusa_shop', 'kiosk')).toBeNull();
     s.lifetime.pieces = 60_000;
     expect(A.setConcept(s, 'asakusa_shop', 'omakase')).toBeNull();
-    expect(sim.bill(s, 'asakusa_shop', { recipe: 'salmon_nigiri', pieces: 1, manualOnly: false } as any)).toBeGreaterThan(200);
+    expect(sim.bill(s, 'asakusa_shop', { recipe: 'salmon_nigiri', pieces: 1, manualOnly: false } as any)).toBeGreaterThan(150); // omakase price level > a bar's ¥120
   });
 
   it('house rules need a manager or research, then auto-hire and auto-price', () => {

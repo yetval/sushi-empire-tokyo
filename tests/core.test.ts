@@ -53,9 +53,9 @@ describe('milestones', () => {
     const cash0 = s.cash;
     sim.addPieces(s, 1_000);
     expect(s.milestoneIndex).toBe(2);
-    expect(s.cash).toBe(cash0 + 2_000 + 15_000);
+    expect(s.cash).toBe(cash0 + 6_000 + 20_000);
     sim.checkMilestones(s); sim.checkMilestones(s);
-    expect(s.cash).toBe(cash0 + 17_000);
+    expect(s.cash).toBe(cash0 + 26_000);
     expect(s.recipes).toContain('tuna_nigiri');
   });
 

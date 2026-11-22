@@ -101,7 +101,7 @@ export function unlockDistrict(s: GameState, d: string): Result {
 /** Up-front cost to open (or convert to) a concept on a lot: the fit-out. */
 export function fitoutCost(propId: string, concept: ConceptId): number {
   const c = CONCEPTS[concept];
-  return c.fitout ? Math.round(Math.max(15_000, PROPERTIES[propId].price * c.fitout)) : 0;
+  return c.fitout ? Math.round(Math.max(5_000, PROPERTIES[propId].price * c.fitout)) : 0;
 }
 
 export function conceptAllowed(s: GameState, propId: string, concept: ConceptId): Result {

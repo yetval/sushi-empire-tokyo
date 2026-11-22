@@ -126,24 +126,24 @@ const R = (id: string, name: string, jp: string, region: Region, traffic: number
   ({ id, name, jp, region, walkable: false, traffic, elasticity, unlock: { pieces, cost, chapter2 }, mix, lotBase, blurb, map: { x, y } });
 
 export const REMOTE_AREAS: Record<string, AreaDef> = Object.fromEntries([
-  R('ueno', 'Ueno', '上野', 'tokyo', 6, 1.4, 2_000, 60_000, 70_000, { tourist: 3, family: 3, office: 1 }, 'Museums, the zoo and Ameyoko market crowds.', 62, 22),
-  R('ikebukuro', 'Ikebukuro', '池袋', 'tokyo', 7, 1.5, 3_000, 90_000, 90_000, { student: 4, office: 2, influencer: 1 }, 'Department stores, anime shops and students.', 30, 16),
-  R('akihabara', 'Akihabara', '秋葉原', 'tokyo', 6.5, 1.6, 5_000, 150_000, 120_000, { student: 4, tourist: 3 }, 'Electric Town: quick, cheap and late-night.', 60, 32),
-  R('harajuku', 'Harajuku', '原宿', 'tokyo', 7, 1.7, 8_000, 250_000, 200_000, { student: 4, influencer: 3, tourist: 2 }, 'Takeshita Street trends. Photogenic sushi sells.', 34, 52),
-  R('shimokita', 'Shimokitazawa', '下北沢', 'tokyo', 4.5, 1.3, 15_000, 300_000, 180_000, { student: 3, foodie: 3 }, 'Thrift shops, live houses and picky foodies.', 18, 62),
-  R('odaiba', 'Odaiba', 'お台場', 'tokyo', 6, 1.3, 20_000, 600_000, 450_000, { family: 4, tourist: 4 }, 'Waterfront malls and weekend families.', 72, 78),
-  R('roppongi', 'Roppongi', '六本木', 'tokyo', 5, 0.9, 30_000, 1_200_000, 900_000, { wealthy: 3, foodie: 2, tourist: 2 }, 'Nightlife, embassies and expense accounts.', 44, 66),
-  R('tsukiji', 'Tsukiji Outer Market', '築地', 'tokyo', 5.5, 1.0, 40_000, 1_000_000, 800_000, { foodie: 5, tourist: 3 }, 'The fish-lover pilgrimage. Quality is everything.', 64, 60),
-  R('osaka_namba', 'Osaka · Namba', '難波', 'japan', 8, 1.3, 150_000, 6_000_000, 3_000_000, { tourist: 3, family: 3, student: 2 }, 'Kuidaore! Big appetites, loud neon.', 48, 62),
-  R('kyoto_gion', 'Kyoto · Gion', '祇園', 'japan', 5, 0.8, 250_000, 12_000_000, 6_000_000, { tourist: 4, wealthy: 2, foodie: 2 }, 'Lantern-lit lanes and refined palates.', 54, 56),
-  R('sapporo', 'Sapporo', '札幌', 'japan', 6, 1.2, 400_000, 18_000_000, 8_000_000, { family: 3, foodie: 3, tourist: 2 }, 'Hokkaido seafood country.', 70, 12),
-  R('fukuoka', 'Fukuoka', '福岡', 'japan', 6.5, 1.3, 600_000, 22_000_000, 9_000_000, { office: 3, student: 2, foodie: 2 }, 'Yatai stalls and Kyushu hospitality.', 22, 80),
-  R('nyc_midtown', 'New York · Midtown', 'ニューヨーク', 'world', 9, 1.1, 1_000_000, 150_000_000, 60_000_000, { office: 4, tourist: 3, wealthy: 2 }, 'Lunch-hour lines around the block.', 22, 34, true),
-  R('london_soho', 'London · Soho', 'ロンドン', 'world', 7, 1.0, 2_000_000, 250_000_000, 90_000_000, { office: 3, foodie: 3, tourist: 2 }, 'Theatre crowds and food critics.', 46, 26, true),
-  R('paris_marais', 'Paris · Le Marais', 'パリ', 'world', 6, 0.8, 4_000_000, 400_000_000, 140_000_000, { foodie: 4, wealthy: 2, tourist: 3 }, 'Gastronomes who know their toro.', 48, 32, true),
-  R('seoul_gangnam', 'Seoul · Gangnam', 'ソウル', 'world', 8, 1.3, 1_500_000, 180_000_000, 70_000_000, { student: 3, influencer: 3, office: 2 }, 'Trend-setters and late-night K-food fans.', 80, 30, true),
-  R('singapore_marina', 'Singapore · Marina Bay', 'シンガポール', 'world', 7, 1.0, 6_000_000, 600_000_000, 200_000_000, { wealthy: 3, tourist: 3, office: 2 }, 'Skyline dining for the jet set.', 74, 58, true),
-  R('dubai_marina', 'Dubai · Marina', 'ドバイ', 'world', 5, 0.6, 10_000_000, 1_000_000_000, 350_000_000, { wealthy: 6, tourist: 2 }, 'Gold-leaf nigiri, no budget.', 60, 44, true),
+  R('ueno', 'Ueno', '上野', 'tokyo', 6, 1.4, 2_000, 60_000, 140_000, { tourist: 3, family: 3, office: 1 }, 'Museums, the zoo and Ameyoko market crowds.', 62, 22),
+  R('ikebukuro', 'Ikebukuro', '池袋', 'tokyo', 7, 1.5, 3_000, 90_000, 225_000, { student: 4, office: 2, influencer: 1 }, 'Department stores, anime shops and students.', 30, 16),
+  R('akihabara', 'Akihabara', '秋葉原', 'tokyo', 6.5, 1.6, 5_000, 150_000, 360_000, { student: 4, tourist: 3 }, 'Electric Town: quick, cheap and late-night.', 60, 32),
+  R('harajuku', 'Harajuku', '原宿', 'tokyo', 7, 1.7, 8_000, 250_000, 1_200_000, { student: 4, influencer: 3, tourist: 2 }, 'Takeshita Street trends. Photogenic sushi sells.', 34, 52),
+  R('shimokita', 'Shimokitazawa', '下北沢', 'tokyo', 4.5, 1.3, 15_000, 300_000, 1_400_000, { student: 3, foodie: 3 }, 'Thrift shops, live houses and picky foodies.', 18, 62),
+  R('odaiba', 'Odaiba', 'お台場', 'tokyo', 6, 1.3, 20_000, 600_000, 2_800_000, { family: 4, tourist: 4 }, 'Waterfront malls and weekend families.', 72, 78),
+  R('roppongi', 'Roppongi', '六本木', 'tokyo', 5, 0.9, 30_000, 1_200_000, 5_000_000, { wealthy: 3, foodie: 2, tourist: 2 }, 'Nightlife, embassies and expense accounts.', 44, 66),
+  R('tsukiji', 'Tsukiji Outer Market', '築地', 'tokyo', 5.5, 1.0, 40_000, 1_000_000, 4_800_000, { foodie: 5, tourist: 3 }, 'The fish-lover pilgrimage. Quality is everything.', 64, 60),
+  R('osaka_namba', 'Osaka · Namba', '難波', 'japan', 8, 1.3, 150_000, 6_000_000, 12_000_000, { tourist: 3, family: 3, student: 2 }, 'Kuidaore! Big appetites, loud neon.', 48, 62),
+  R('kyoto_gion', 'Kyoto · Gion', '祇園', 'japan', 5, 0.8, 250_000, 12_000_000, 18_000_000, { tourist: 4, wealthy: 2, foodie: 2 }, 'Lantern-lit lanes and refined palates.', 54, 56),
+  R('sapporo', 'Sapporo', '札幌', 'japan', 6, 1.2, 400_000, 18_000_000, 24_000_000, { family: 3, foodie: 3, tourist: 2 }, 'Hokkaido seafood country.', 70, 12),
+  R('fukuoka', 'Fukuoka', '福岡', 'japan', 6.5, 1.3, 600_000, 22_000_000, 27_000_000, { office: 3, student: 2, foodie: 2 }, 'Yatai stalls and Kyushu hospitality.', 22, 80),
+  R('nyc_midtown', 'New York · Midtown', 'ニューヨーク', 'world', 9, 1.1, 1_000_000, 150_000_000, 180_000_000, { office: 4, tourist: 3, wealthy: 2 }, 'Lunch-hour lines around the block.', 22, 34, true),
+  R('london_soho', 'London · Soho', 'ロンドン', 'world', 7, 1.0, 2_000_000, 250_000_000, 270_000_000, { office: 3, foodie: 3, tourist: 2 }, 'Theatre crowds and food critics.', 46, 26, true),
+  R('paris_marais', 'Paris · Le Marais', 'パリ', 'world', 6, 0.8, 4_000_000, 400_000_000, 420_000_000, { foodie: 4, wealthy: 2, tourist: 3 }, 'Gastronomes who know their toro.', 48, 32, true),
+  R('seoul_gangnam', 'Seoul · Gangnam', 'ソウル', 'world', 8, 1.3, 1_500_000, 180_000_000, 210_000_000, { student: 3, influencer: 3, office: 2 }, 'Trend-setters and late-night K-food fans.', 80, 30, true),
+  R('singapore_marina', 'Singapore · Marina Bay', 'シンガポール', 'world', 7, 1.0, 6_000_000, 600_000_000, 600_000_000, { wealthy: 3, tourist: 3, office: 2 }, 'Skyline dining for the jet set.', 74, 58, true),
+  R('dubai_marina', 'Dubai · Marina', 'ドバイ', 'world', 5, 0.6, 10_000_000, 1_000_000_000, 1_050_000_000, { wealthy: 6, tourist: 2 }, 'Gold-leaf nigiri, no budget.', 60, 44, true),
 ].map((a) => [a.id, a]));
 
 /** Every area id (walkable districts first). */
@@ -168,11 +168,11 @@ export interface ConceptDef {
 }
 export const CONCEPTS: Record<ConceptId, ConceptDef> = {
   stand: { id: 'stand', name: 'Yatai Stand', jp: '屋台', emoji: '🏮', desc: 'A street stand. Cheap, charming and personal.', traffic: 1, elasticity: 1, price: 1, cook: 1, quality: 0, staff: 1, rent: 1, fitout: 0, walkIn: true, needsServer: true, unlockPieces: 0 },
-  kiosk: { id: 'kiosk', name: 'Takeout Kiosk', jp: '持ち帰り', emoji: '🥡', desc: 'Grab-and-go packs. Fast, cheap, high volume, price-sensitive.', traffic: 1.35, elasticity: 1.35, price: 0.85, cook: 1.35, quality: -0.05, staff: 1, rent: 0.7, fitout: 0.15, walkIn: true, needsServer: true, unlockPieces: 0, mix: { student: 2, office: 2 } },
+  kiosk: { id: 'kiosk', name: 'Takeout Kiosk', jp: '持ち帰り', emoji: '🥡', desc: 'Grab-and-go packs. Fast, cheap, high volume, price-sensitive.', traffic: 1.35, elasticity: 1.35, price: 0.85, cook: 1.15, quality: -0.05, staff: 1, rent: 0.7, fitout: 0.15, walkIn: true, needsServer: true, unlockPieces: 0, mix: { student: 2, office: 2 } },
   bar: { id: 'bar', name: 'Sushi Bar', jp: '寿司屋', emoji: '🍣', desc: 'The classic counter. Balanced in every way.', traffic: 1, elasticity: 1, price: 1, cook: 1, quality: 0, staff: 1, rent: 1, fitout: 0.2, walkIn: true, needsServer: true, unlockPieces: 0 },
-  kaiten: { id: 'kaiten', name: 'Kaiten Conveyor', jp: '回転寿司', emoji: '🔄', desc: 'Plates circle on a belt. Huge volume, low prices, needs big kitchens.', traffic: 1.7, elasticity: 1.5, price: 0.8, cook: 1.45, quality: -0.08, staff: 1.5, rent: 1.15, fitout: 0.35, walkIn: true, needsServer: true, unlockPieces: 5_000, mix: { family: 3, student: 2 } },
-  omakase: { id: 'omakase', name: 'Omakase Room', jp: 'おまかせ', emoji: '🎎', desc: 'Chef’s choice for a handful of guests. Tiny volume, enormous bills, needs master chefs.', traffic: 0.4, elasticity: 0.45, price: 2.6, cook: 0.7, quality: 0.12, staff: 0.75, rent: 1.25, fitout: 0.5, walkIn: true, needsServer: true, unlockPieces: 50_000, mix: { wealthy: 4, foodie: 3, critic: 0.3 } },
-  ghost: { id: 'ghost', name: 'Ghost Kitchen', jp: 'デリバリー', emoji: '🛵', desc: 'Delivery-only kitchen. No dining room, no servers, cheap rent.', traffic: 1.1, elasticity: 1.2, price: 0.95, cook: 1.15, quality: -0.03, staff: 1.25, rent: 0.45, fitout: 0.25, walkIn: false, needsServer: false, unlockPieces: 10_000, mix: { office: 2, student: 2 } },
+  kaiten: { id: 'kaiten', name: 'Kaiten Conveyor', jp: '回転寿司', emoji: '🔄', desc: 'Plates circle on a belt. Huge volume, low prices, needs big kitchens.', traffic: 1.55, elasticity: 1.5, price: 0.8, cook: 1.2, quality: -0.08, staff: 1.3, rent: 1.15, fitout: 0.35, walkIn: true, needsServer: true, unlockPieces: 5_000, mix: { family: 3, student: 2 } },
+  omakase: { id: 'omakase', name: 'Omakase Room', jp: 'おまかせ', emoji: '🎎', desc: 'Chef’s choice for a handful of guests. Tiny volume, enormous bills, needs master chefs.', traffic: 0.25, elasticity: 0.45, price: 1.4, cook: 0.7, quality: 0.12, staff: 0.75, rent: 1.25, fitout: 0.5, walkIn: true, needsServer: true, unlockPieces: 50_000, mix: { wealthy: 4, foodie: 3, critic: 0.3 } },
+  ghost: { id: 'ghost', name: 'Ghost Kitchen', jp: 'デリバリー', emoji: '🛵', desc: 'Delivery-only kitchen. No dining room, no servers, cheap rent.', traffic: 1.1, elasticity: 1.2, price: 0.95, cook: 1.0, quality: -0.03, staff: 1.25, rent: 0.45, fitout: 0.25, walkIn: false, needsServer: false, unlockPieces: 10_000, mix: { office: 2, student: 2 } },
 };
 export const CONCEPT_IDS = Object.keys(CONCEPTS) as ConceptId[];
 
@@ -188,33 +188,33 @@ export interface PropertyDef {
 
 export const PROPERTIES: Record<string, PropertyDef> = {
   asakusa_stand: { id: 'asakusa_stand', district: 'asakusa', name: "Grandpa Kenji's Stand", kind: 'stand', price: 0, rent: 0, size: 1.5, seatsMax: 4, chefSlots: 1, serverSlots: 1 },
-  asakusa_shop: { id: 'asakusa_shop', district: 'asakusa', name: 'Kaminari Corner Shop', kind: 'shop', price: 45_000, rent: 1_200, size: 2.2, seatsMax: 8, chefSlots: 2, serverSlots: 1 },
+  asakusa_shop: { id: 'asakusa_shop', district: 'asakusa', name: 'Kaminari Corner Shop', kind: 'shop', price: 15_000, rent: 600, size: 2.2, seatsMax: 8, chefSlots: 2, serverSlots: 1 },
   asakusa_house: { id: 'asakusa_house', district: 'asakusa', name: 'Sumida Riverside House', kind: 'restaurant', price: 180_000, rent: 3_500, size: 3.2, seatsMax: 12, chefSlots: 3, serverSlots: 2 },
   shibuya_crossing: { id: 'shibuya_crossing', district: 'shibuya', name: 'Crossing Sushi Bar', kind: 'shop', price: 450_000, rent: 9_000, size: 3, seatsMax: 10, chefSlots: 3, serverSlots: 2 },
-  shibuya_center: { id: 'shibuya_center', district: 'shibuya', name: 'Center-gai Mega Sushi', kind: 'restaurant', price: 1_400_000, rent: 22_000, size: 5, seatsMax: 16, chefSlots: 5, serverSlots: 3 },
-  shinjuku_lunch: { id: 'shinjuku_lunch', district: 'shinjuku', name: 'Nishi-Shinjuku Lunch Counter', kind: 'shop', price: 1_800_000, rent: 28_000, size: 4, seatsMax: 12, chefSlots: 4, serverSlots: 2 },
-  shinjuku_tower: { id: 'shinjuku_tower', district: 'shinjuku', name: 'Skytower Sushi Hall', kind: 'flagship', price: 6_000_000, rent: 70_000, size: 7, seatsMax: 20, chefSlots: 7, serverSlots: 4 },
+  shibuya_center: { id: 'shibuya_center', district: 'shibuya', name: 'Center-gai Mega Sushi', kind: 'restaurant', price: 4_000_000, rent: 60_000, size: 5, seatsMax: 16, chefSlots: 5, serverSlots: 3 },
+  shinjuku_lunch: { id: 'shinjuku_lunch', district: 'shinjuku', name: 'Nishi-Shinjuku Lunch Counter', kind: 'shop', price: 4_500_000, rent: 65_000, size: 4, seatsMax: 12, chefSlots: 4, serverSlots: 2 },
+  shinjuku_tower: { id: 'shinjuku_tower', district: 'shinjuku', name: 'Skytower Sushi Hall', kind: 'flagship', price: 18_000_000, rent: 220_000, size: 7, seatsMax: 20, chefSlots: 7, serverSlots: 4 },
   ginza_omakase: { id: 'ginza_omakase', district: 'ginza', name: 'Ginza Omakase Room', kind: 'restaurant', price: 9_000_000, rent: 120_000, size: 4, seatsMax: 10, chefSlots: 4, serverSlots: 2 },
-  ginza_flagship: { id: 'ginza_flagship', district: 'ginza', name: 'Golden Koi Flagship', kind: 'flagship', price: 30_000_000, rent: 320_000, size: 9, seatsMax: 20, chefSlots: 8, serverSlots: 4 },
+  ginza_flagship: { id: 'ginza_flagship', district: 'ginza', name: 'Golden Koi Flagship', kind: 'flagship', price: 45_000_000, rent: 480_000, size: 9, seatsMax: 20, chefSlots: 8, serverSlots: 4 },
 };
 // more walkable lots (placed in the 3D districts)
 Object.assign(PROPERTIES, {
-  asakusa_alley: { id: 'asakusa_alley', district: 'asakusa', name: 'Lantern Alley Counter', kind: 'shop', price: 90_000, rent: 1_800, size: 2.4, seatsMax: 8, chefSlots: 2, serverSlots: 1 },
-  asakusa_market: { id: 'asakusa_market', district: 'asakusa', name: 'Nakamise Market Hall', kind: 'restaurant', price: 320_000, rent: 5_500, size: 3.6, seatsMax: 14, chefSlots: 4, serverSlots: 2 },
+  asakusa_alley: { id: 'asakusa_alley', district: 'asakusa', name: 'Lantern Alley Counter', kind: 'shop', price: 15_000, rent: 600, size: 2.4, seatsMax: 8, chefSlots: 2, serverSlots: 1 },
+  asakusa_market: { id: 'asakusa_market', district: 'asakusa', name: 'Nakamise Market Hall', kind: 'restaurant', price: 520_000, rent: 9_000, size: 3.6, seatsMax: 14, chefSlots: 4, serverSlots: 2 },
   shibuya_alley: { id: 'shibuya_alley', district: 'shibuya', name: 'Nonbei Yokocho Nook', kind: 'shop', price: 300_000, rent: 6_500, size: 2.6, seatsMax: 8, chefSlots: 2, serverSlots: 1 },
-  shibuya_scramble: { id: 'shibuya_scramble', district: 'shibuya', name: 'Scramble Square Sushi', kind: 'restaurant', price: 950_000, rent: 17_000, size: 4.2, seatsMax: 16, chefSlots: 5, serverSlots: 3 },
-  shinjuku_omoide: { id: 'shinjuku_omoide', district: 'shinjuku', name: 'Omoide Lane Stall', kind: 'shop', price: 1_100_000, rent: 18_000, size: 3.2, seatsMax: 8, chefSlots: 3, serverSlots: 1 },
-  shinjuku_station: { id: 'shinjuku_station', district: 'shinjuku', name: 'West Exit Sushi Station', kind: 'restaurant', price: 3_200_000, rent: 45_000, size: 5.5, seatsMax: 16, chefSlots: 6, serverSlots: 3 },
+  shibuya_scramble: { id: 'shibuya_scramble', district: 'shibuya', name: 'Scramble Square Sushi', kind: 'restaurant', price: 1_800_000, rent: 30_000, size: 4.2, seatsMax: 16, chefSlots: 5, serverSlots: 3 },
+  shinjuku_omoide: { id: 'shinjuku_omoide', district: 'shinjuku', name: 'Omoide Lane Stall', kind: 'shop', price: 2_000_000, rent: 32_000, size: 3.2, seatsMax: 8, chefSlots: 3, serverSlots: 1 },
+  shinjuku_station: { id: 'shinjuku_station', district: 'shinjuku', name: 'West Exit Sushi Station', kind: 'restaurant', price: 9_000_000, rent: 125_000, size: 5.5, seatsMax: 16, chefSlots: 6, serverSlots: 3 },
   ginza_corner: { id: 'ginza_corner', district: 'ginza', name: 'Chuo-dori Corner', kind: 'shop', price: 4_500_000, rent: 70_000, size: 3.2, seatsMax: 10, chefSlots: 3, serverSlots: 2 },
-  ginza_tower: { id: 'ginza_tower', district: 'ginza', name: 'Ginza Six Sky Sushi', kind: 'restaurant', price: 15_000_000, rent: 190_000, size: 6, seatsMax: 16, chefSlots: 6, serverSlots: 3 },
+  ginza_tower: { id: 'ginza_tower', district: 'ginza', name: 'Ginza Six Sky Sushi', kind: 'restaurant', price: 22_000_000, rent: 280_000, size: 6, seatsMax: 16, chefSlots: 6, serverSlots: 3 },
 } satisfies Record<string, PropertyDef>);
 // management-only lots: three per remote area (small / mid / large)
 for (const a of Object.values(REMOTE_AREAS)) {
-  const tiers = [['shop', 'Sushi Counter', 1, 2.5, 3, 1], ['restaurant', 'Sushi House', 3.2, 4, 5, 2], ['flagship', 'Grand Sushi Hall', 9, 6.5, 8, 3]] as const;
+  const tiers = [['shop', 'Sushi Counter', 1, 2.5, 3, 1], ['restaurant', 'Sushi House', 4, 4, 5, 2], ['flagship', 'Grand Sushi Hall', 12, 6.5, 8, 3]] as const;
   tiers.forEach(([kind, label, pm, size, chefs, servers], i) => {
     const id = `${a.id}_${i + 1}`;
     const price = Math.round(a.lotBase * pm);
-    PROPERTIES[id] = { id, district: a.id, name: `${a.name.split(' · ').pop()} ${label}`, kind, price, rent: Math.round(price * 0.02), size, seatsMax: 6 + 4 * (i + 1), chefSlots: chefs, serverSlots: servers };
+    PROPERTIES[id] = { id, district: a.id, name: `${a.name.split(' · ').pop()} ${label}`, kind, price, rent: Math.round(price * 0.008), size, seatsMax: 6 + 4 * (i + 1), chefSlots: chefs, serverSlots: servers };
   });
 }
 export const PROPERTY_IDS = Object.keys(PROPERTIES);
@@ -228,16 +228,16 @@ export interface UpgradeDef {
 }
 
 export const UPGRADES: Record<string, UpgradeDef> = {
-  station: { id: 'station', name: 'Prep Station', category: 'kitchen', emoji: '🔪', max: 5, base: 2_500, growth: 2.6, desc: '+20% cooking speed per level (you and chefs).' },
+  station: { id: 'station', name: 'Prep Station', category: 'kitchen', emoji: '🔪', max: 4, base: 5_000, growth: 3.5, desc: '+20% cooking speed per level (you and chefs).' },
   fridge: { id: 'fridge', name: 'Refrigerated Case', category: 'kitchen', emoji: '🧊', max: 3, base: 4_000, growth: 3, desc: 'Fresher fish: +6% food quality per level.' },
-  extra_station: { id: 'extra_station', name: 'Extra Chef Station', category: 'kitchen', emoji: '👨‍🍳', max: 4, base: 12_000, growth: 3, desc: '+1 chef slot per level (up to property limit +4).' },
-  expand: { id: 'expand', name: 'Renovate & Expand', category: 'dining', emoji: '🏗️', max: 3, base: 0, growth: 2.2, desc: '+25% guest capacity & foot traffic, +2 chef slots per level. A bigger, grander restaurant.' },
+  extra_station: { id: 'extra_station', name: 'Extra Chef Station', category: 'kitchen', emoji: '👨‍🍳', max: 3, base: 40_000, growth: 3.8, desc: '+1 chef slot per level (up to property limit +3).' },
+  expand: { id: 'expand', name: 'Renovate & Expand', category: 'dining', emoji: '🏗️', max: 3, base: 0, growth: 3.5, desc: '+25% guest capacity & foot traffic, +2 chef slots per level. A bigger, grander restaurant.' },
   seats: { id: 'seats', name: 'Seating', category: 'dining', emoji: '🪑', max: 5, base: 3_000, growth: 2.2, desc: 'More seats: more guests at once and +patience.' },
   lanterns: { id: 'lanterns', name: 'Paper Lanterns', category: 'decor', emoji: '🏮', max: 3, base: 1_500, growth: 2.5, desc: '+Atmosphere. Glows warmly at night.' },
   plants: { id: 'plants', name: 'Bonsai & Plants', category: 'decor', emoji: '🪴', max: 3, base: 2_000, growth: 2.5, desc: '+Atmosphere and +cleanliness feel.' },
-  sign: { id: 'sign', name: 'Neon Sign', category: 'decor', emoji: '💡', max: 3, base: 3_500, growth: 3, desc: '+15% foot traffic per level. Pedestrians notice you.' },
+  sign: { id: 'sign', name: 'Neon Sign', category: 'decor', emoji: '💡', max: 3, base: 8_000, growth: 3.5, desc: '+15% foot traffic per level. Pedestrians notice you.' },
   register: { id: 'register', name: 'Fast Register', category: 'operations', emoji: '🧾', max: 3, base: 3_000, growth: 2.8, desc: 'Orders taken faster, guests wait less (+15% patience).' },
-  delivery: { id: 'delivery', name: 'Delivery Fleet', category: 'operations', emoji: '🛵', max: 4, base: 45_000, growth: 3.2, desc: '+15% orders per level from delivery apps. Scooters park out front.' },
+  delivery: { id: 'delivery', name: 'Delivery Fleet', category: 'operations', emoji: '🛵', max: 4, base: 80_000, growth: 3.6, desc: '+15% orders per level from delivery apps. Scooters park out front.' },
   cleaning: { id: 'cleaning', name: 'Cleaning Kit', category: 'operations', emoji: '🧽', max: 3, base: 2_000, growth: 2.5, desc: 'Restaurant gets dirty 25% slower per level.' },
 };
 
@@ -270,11 +270,11 @@ export interface CampaignDef { id: string; name: string; emoji: string; cost: nu
 
 export const CAMPAIGNS: Record<string, CampaignDef> = {
   flyers: { id: 'flyers', name: 'Hand Out Flyers', emoji: '📄', cost: 800, days: 1, boost: 0.25, scope: 'district', brand: 0.5, desc: '+25% guests in your current district for 1 day.' },
-  newspaper: { id: 'newspaper', name: 'Local Newspaper Ad', emoji: '📰', cost: 6_000, days: 2, boost: 0.3, scope: 'city', brand: 1, desc: '+30% guests in all of Tokyo for 2 days.' },
-  social: { id: 'social', name: 'Social Media Campaign', emoji: '📱', cost: 30_000, days: 3, boost: 0.5, scope: 'city', brand: 2, requires: 'social_media', desc: '+50% guests citywide for 3 days. Attracts students.' },
-  influencer: { id: 'influencer', name: 'Influencer Partnership', emoji: '🤳', cost: 150_000, days: 3, boost: 0.8, scope: 'city', brand: 4, requires: 'influencer_network', desc: '+80% guests citywide for 3 days. Influencers visit.' },
-  billboard: { id: 'billboard', name: 'Shibuya Billboard', emoji: '📺', cost: 800_000, days: 5, boost: 0.7, scope: 'city', brand: 6, requires: 'brand_story', desc: '+70% guests citywide for 5 days and big brand boost.' },
-  tv: { id: 'tv', name: 'National TV Spot', emoji: '🎬', cost: 6_000_000, days: 5, boost: 1.2, scope: 'global', brand: 10, requires: 'chapter2', desc: '+120% guests and franchise output for 5 days.' },
+  newspaper: { id: 'newspaper', name: 'Local Newspaper Ad', emoji: '📰', cost: 20_000, days: 2, boost: 0.3, scope: 'city', brand: 1, desc: '+30% guests in all of Tokyo for 2 days.' },
+  social: { id: 'social', name: 'Social Media Campaign', emoji: '📱', cost: 120_000, days: 3, boost: 0.5, scope: 'city', brand: 2, requires: 'social_media', desc: '+50% guests citywide for 3 days. Attracts students.' },
+  influencer: { id: 'influencer', name: 'Influencer Partnership', emoji: '🤳', cost: 600_000, days: 3, boost: 0.8, scope: 'city', brand: 4, requires: 'influencer_network', desc: '+80% guests citywide for 3 days. Influencers visit.' },
+  billboard: { id: 'billboard', name: 'Shibuya Billboard', emoji: '📺', cost: 3_000_000, days: 5, boost: 0.7, scope: 'city', brand: 6, requires: 'brand_story', desc: '+70% guests citywide for 5 days and big brand boost.' },
+  tv: { id: 'tv', name: 'National TV Spot', emoji: '🎬', cost: 20_000_000, days: 5, boost: 1.2, scope: 'global', brand: 10, requires: 'chapter2', desc: '+120% guests and franchise output for 5 days.' },
   global: { id: 'global', name: 'International Brand Campaign', emoji: '🌏', cost: 80_000_000, days: 7, boost: 1.5, scope: 'global', brand: 15, requires: 'global_logistics', desc: '+150% everywhere for 7 days, including franchises.' },
 };
 
@@ -289,7 +289,7 @@ export interface ResearchDef {
 export const RESEARCH: Record<string, ResearchDef> = {
   knife_skills: { id: 'knife_skills', name: 'Knife Skills', emoji: '🔪', branch: 'cooking', cost: 10, requires: [], minPieces: 0, desc: '+15% cooking speed everywhere.' },
   rice_science: { id: 'rice_science', name: 'Rice Science', emoji: '🍚', branch: 'cooking', cost: 40, requires: ['knife_skills'], minPieces: 0, desc: '+8% food quality everywhere.' },
-  conveyor: { id: 'conveyor', name: 'Conveyor Belt Kitchens', emoji: '🔄', branch: 'cooking', cost: 1_200, requires: ['rice_science'], minPieces: 20_000, desc: '+30% cooking speed everywhere.' },
+  conveyor: { id: 'conveyor', name: 'Conveyor Belt Kitchens', emoji: '🔄', branch: 'cooking', cost: 600, requires: ['rice_science'], minPieces: 20_000, desc: '+30% cooking speed everywhere.' },
   robot_assist: { id: 'robot_assist', name: 'Robot Rice Formers', emoji: '🤖', branch: 'cooking', cost: 20_000, requires: ['conveyor'], minPieces: 1_000_000, desc: '+50% cooking speed everywhere.' },
 
   bulk_buying: { id: 'bulk_buying', name: 'Bulk Buying', emoji: '📦', branch: 'supply', cost: 15, requires: [], minPieces: 0, desc: '-10% ingredient costs.' },
@@ -329,13 +329,13 @@ export const RESEARCH: Record<string, ResearchDef> = {
 export interface Milestone { pieces: number; title: string; reward: { cash?: number; rp?: number; recipe?: string; text: string } }
 
 const FIXED_MILESTONES: Milestone[] = [
-  { pieces: 100, title: 'First Steps', reward: { cash: 2_000, recipe: 'tuna_nigiri', text: '¥2,000 + Tuna Nigiri recipe' } },
-  { pieces: 1_000, title: 'Rising Sushi Chef', reward: { cash: 15_000, recipe: 'tuna_maki', rp: 20, text: '¥15,000 + Tuna Maki + 20 RP. Shibuya can be unlocked!' } },
+  { pieces: 100, title: 'First Steps', reward: { cash: 6_000, recipe: 'tuna_nigiri', text: '¥6,000 + Tuna Nigiri recipe' } },
+  { pieces: 1_000, title: 'Rising Sushi Chef', reward: { cash: 20_000, recipe: 'tuna_maki', rp: 20, text: '¥20,000 + Tuna Maki + 20 RP. Shibuya can be unlocked!' } },
   { pieces: 10_000, title: 'Neighborhood Favorite', reward: { cash: 120_000, rp: 80, text: '¥120,000 + 80 RP. Shinjuku can be unlocked!' } },
   { pieces: 50_000, title: 'Tokyo Sensation', reward: { cash: 600_000, rp: 200, text: '¥600,000 + 200 RP. Ginza can be unlocked!' } },
-  { pieces: 100_000, title: 'Sushi Mogul', reward: { cash: 1_500_000, rp: 400, text: '¥1.5M + 400 RP' } },
-  { pieces: 250_000, title: 'Restaurant Tycoon', reward: { cash: 4_000_000, rp: 800, text: '¥4M + 800 RP' } },
-  { pieces: 500_000, title: 'Sushi Legend', reward: { cash: 10_000_000, rp: 1_500, text: '¥10M + 1,500 RP' } },
+  { pieces: 100_000, title: 'Sushi Mogul', reward: { cash: 800_000, rp: 400, text: '¥800,000 + 400 RP' } },
+  { pieces: 250_000, title: 'Restaurant Tycoon', reward: { cash: 2_000_000, rp: 800, text: '¥2M + 800 RP' } },
+  { pieces: 500_000, title: 'Sushi Legend', reward: { cash: 5_000_000, rp: 1_500, text: '¥5M + 1,500 RP' } },
   { pieces: 1_000_000, title: 'Sushi Emperor', reward: { cash: 25_000_000, rp: 3_000, text: '¥25M + 3,000 RP + Golden Maneki-neko. Chapter 2: The Empire begins!' } },
   { pieces: 2_000_000, title: 'Tokyo Dominator', reward: { cash: 50_000_000, rp: 5_000, text: '¥50M + 5,000 RP' } },
   { pieces: 5_000_000, title: "Japan's Favorite", reward: { cash: 120_000_000, rp: 10_000, text: '¥120M + 10,000 RP' } },
