@@ -82,7 +82,10 @@ export function hourFactor(minute: number): number {
 
 // ---------------------------------------------------------------- staff helpers
 /** The restaurant's format (concept). */
-export const conceptOf = (s: GameState, restId: string) => CONCEPTS[s.restaurants[restId]?.concept ?? 'bar'] ?? CONCEPTS.bar;
+export const conceptOf = (s: GameState, restId: string) => {
+  const c = s.restaurants[restId]?.concept;
+  return c && Object.hasOwn(CONCEPTS, c) ? CONCEPTS[c] : CONCEPTS.bar;
+};
 
 export const staffAt = (s: GameState, restId: string, role?: Role) =>
   s.staff.filter((e) => e.restaurant === restId && (!role || e.role === role));
@@ -551,7 +554,9 @@ export function franchiseRoyaltyPerPiece(s: GameState): number {
 export const restaurantRent = (s: GameState, id: string) => Math.round(PROPERTIES[id].rent * conceptOf(s, id).rent);
 
 export function dailyCosts(s: GameState): { wages: number; rent: number } {
-  const wages = s.staff.filter((e) => e.restaurant).reduce((a, e) => a + e.wage, 0) + s.staff.filter((e) => !e.restaurant).reduce((a, e) => a + e.wage * 0.5, 0);
+  // anyone who worked a shift today is paid in full, even if unassigned before midnight (no wage dodging)
+  const fullPay = (e: Employee) => !!e.restaurant || e.workedDay === s.day;
+  const wages = s.staff.filter(fullPay).reduce((a, e) => a + e.wage, 0) + s.staff.filter((e) => !fullPay(e)).reduce((a, e) => a + e.wage * 0.5, 0);
   const rent = Object.keys(s.restaurants).reduce((a, id) => a + restaurantRent(s, id), 0);
   return { wages, rent };
 }
@@ -679,7 +684,7 @@ export function offlineProgress(s: GameState, seconds: number): { seconds: numbe
     if (!hasManager(s, r.id) || !isAutomated(s, r.id)) continue;
     const menu = r.menu.filter((x) => s.recipes.includes(x));
     if (!menu.length) continue;
-    const avgPrice = menu.reduce((a, x) => a + RECIPES[x].price, 0) / menu.length * r.priceMult;
+    const avgPrice = menu.reduce((a, x) => a + RECIPES[x].price, 0) / menu.length * r.priceMult * conceptOf(s, r.id).price; // same price level as bill()
     const avgCost = menu.reduce((a, x) => a + Object.entries(RECIPES[x].ingredients).reduce((b, [k, n]) => b + ingredientPrice(s, k as IngredientId) * 1.08 * (n ?? 0), 0), 0) / menu.length;
     const avgPrep = menu.reduce((a, x) => a + RECIPES[x].prep / 3.5, 0) / menu.length;
     const demandPPS = (demandPerMin(s, r.id, 12 * 60) / 1.5) * avgHour / 60 * 3; // ~3 pieces per customer

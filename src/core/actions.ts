@@ -57,6 +57,7 @@ export function assign(s: GameState, empId: number, restId: string | null): Resu
   const e = s.staff.find((x) => x.id === empId);
   if (!e) return 'Unknown employee';
   if (restId && e.restaurant !== restId && staffAt(s, restId, e.role).length >= slotsFor(s, restId, e.role)) return 'No free slot for that role there';
+  if (e.restaurant) e.workedDay = s.day; // worked today: full wage even if unassigned now
   e.restaurant = restId;
   changed();
   return null;
@@ -143,7 +144,8 @@ export function setConcept(s: GameState, restId: string, concept: ConceptId): Re
   if (!spend(s, cost)) return `Need ${yen(cost)}`;
   r.concept = concept;
   // extra chefs/servers beyond the new format's slots are moved to the unassigned pool
-  for (const role of ['chef', 'server'] as Role[]) staffAt(s, restId, role).slice(slotsFor(s, restId, role)).forEach((e) => (e.restaurant = null));
+  // keep the most skilled; the rest move to the unassigned pool
+  for (const role of ['chef', 'server'] as Role[]) [...staffAt(s, restId, role)].sort((a, b) => b.skill - a.skill).slice(slotsFor(s, restId, role)).forEach((e) => { e.workedDay = s.day; e.restaurant = null; });
   toast(`${CONCEPTS[concept].emoji} ${r.name} is now a ${CONCEPTS[concept].name}!`, 'good');
   changed();
   return null;

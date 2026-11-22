@@ -5,7 +5,7 @@ import { createContractState, sanitizeContracts, type ContractState } from './co
 import {
   CAMPAIGNS, CITIES, CUSTOMERS, CustomerType, DISTRICTS, DistrictId, EVENTS, INGREDIENT_IDS, IngredientId,
   PROPERTIES, RECIPES, RIVALS, ROLES, Role, START_MINUTE, START_RECIPES, wageFor,
-  AREAS, ConceptId,
+  AREAS, CONCEPTS, ConceptId,
 } from './data';
 
 export const SAVE_VERSION = 1;
@@ -57,6 +57,7 @@ export const emptyDay = (day: number): RestDay => ({ day, rev: 0, cost: 0, piece
 
 export interface Employee {
   id: number; name: string; role: Role; skill: number; xp: number; wage: number;
+  workedDay?: number; // last day this person was assigned to a restaurant (full wage that day)
   restaurant: string | null; look: Avatar;
 }
 
@@ -164,6 +165,13 @@ export function migrate(raw: unknown): GameState {
   for (const [id, r] of Object.entries(s.restaurants)) {
     if (!knownId(id, PROPERTIES) || !isRecord(r)) throw new Error('Invalid restaurant');
     deepFill(r, newRestaurant(id, s.day));
+    if (!knownId(r.concept, CONCEPTS)) r.concept = PROPERTIES[id].kind === 'stand' ? 'stand' : 'bar';
+    if (!isRecord(r.policy)) r.policy = { autoHire: false, autoPrice: false };
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+    const day = (d: unknown) => (isRecord(d) ? { day: num(d.day), rev: num(d.rev), cost: num(d.cost), pieces: num(d.pieces), guests: num(d.guests), lost: num(d.lost) } : null);
+    r.hist = (Array.isArray(r.hist) ? r.hist : []).map(day).filter((d): d is NonNullable<typeof d> => d !== null).slice(-14);
+    r.day = day(r.day) ?? emptyDay(s.day);
+    if (!Array.isArray(r.log)) r.log = [];
     if (r.id !== id || r.menu.some((recipe) => !knownId(recipe, RECIPES))) throw new Error('Invalid restaurant menu');
     if (!(r.takeoutFrac >= 0 && r.takeoutFrac < 1)) throw new Error('Invalid takeout counter');
     for (const ticket of [...r.orders, ...r.ready]) {

@@ -80,3 +80,34 @@ describe('tycoon: areas, concepts, many restaurants', () => {
     expect(A.unlockDistrict(s, 'nyc_midtown')).toMatch(/Chapter 2/);
   });
 });
+
+describe('tycoon review A regressions', () => {
+  it('offline earnings use the concept price level', () => {
+    s.cash = 1e9; s.lifetime.pieces = 1e6;
+    A.buyProperty(s, 'asakusa_shop', 'omakase');
+    E.hireBest(s, 'asakusa_shop', 'chef'); E.hireBest(s, 'asakusa_shop', 'manager');
+    const a = sim.offlineProgress(JSON.parse(JSON.stringify(s)), 3600);
+    s.restaurants.asakusa_shop.concept = 'bar';
+    const b = sim.offlineProgress(JSON.parse(JSON.stringify(s)), 3600);
+    expect(a.revenue / Math.max(1, a.pieces)).toBeGreaterThan(b.revenue / Math.max(1, b.pieces));
+  });
+  it('unknown/prototype concepts in saves are repaired', async () => {
+    const { deserialize, serialize } = await import('../src/core/state');
+    s.restaurants.asakusa_stand.concept = 'constructor' as any;
+    expect(sim.conceptOf(s, 'asakusa_stand').id).toBe('bar');
+    const raw = JSON.parse(serialize(s));
+    raw.restaurants.asakusa_stand.concept = 'food_truck';
+    raw.restaurants.asakusa_stand.hist = [null, { rev: 'x' }];
+    const m = deserialize(JSON.stringify(raw));
+    expect(m.restaurants.asakusa_stand.concept).toBe('stand');
+    expect(m.restaurants.asakusa_stand.hist.every((d) => Number.isFinite(d.rev))).toBe(true);
+    expect(() => E.restaurantKPIs(m)).not.toThrow();
+  });
+  it('unassigning before midnight does not halve wages', () => {
+    s.cash = 1e9;
+    E.hireBest(s, 'asakusa_stand', 'chef');
+    const full = sim.dailyCosts(s).wages;
+    A.assign(s, s.staff[0].id, null);
+    expect(sim.dailyCosts(s).wages).toBe(full);
+  });
+});
