@@ -1,0 +1,30 @@
+// CONTRACT: what the UI may call on the game. Implemented by Game (src/game.ts).
+import * as THREE from 'three';
+import { DistrictId } from '../core/data';
+import { Avatar, GameState } from '../core/state';
+import type { OrderView } from '../npc/npcs';
+
+export interface UIHost {
+  /** Live game state. Mutate only through src/core/actions.ts (or sim.buyIngredient), or the plain cosmetic fields. */
+  s: GameState;
+  camera: THREE.PerspectiveCamera;
+  started: boolean; // false while on the title screen
+  hasSave(): boolean;
+  newGame(opts: { name: string; company: string; avatar: Avatar }): void;
+  continueGame(): void;
+  importSave(code: string): string | null; // error message or null on success (game reloads)
+  exportSave(): string;
+  deleteSave(): void;
+  save(): boolean;
+  travel(d: DistrictId): void;
+  applySettings(): void; // call after changing s.settings
+  applyAvatar(): void; // call after changing s.player.avatar
+  refreshWorld(): void; // call after restaurant cosmetic changes (name, signColor, theme, uniform)
+  /** Property id of the owned restaurant the player is in/near, else null. */
+  currentSite(): string | null;
+  /** True when the player is standing at the supplier (buying without hotline). */
+  atSupplier(): boolean;
+  setPaused(p: boolean): void;
+  /** Visible customer orders at the restaurant the player is in (HUD ticket rail). */
+  ordersAtCurrentSite(): OrderView[];
+}

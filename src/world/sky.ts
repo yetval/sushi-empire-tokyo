@@ -1,0 +1,231 @@
+// Sky: gradient dome, sun/moon, stars, day-night lighting keyframes, fog, rain and fireworks.
+import * as THREE from 'three';
+import { RADIAL } from './kit';
+
+interface Key { h: number; top: string; hor: string; sun: string; sunI: number; sky: string; gnd: string; hemiI: number; night: number }
+const NIGHT = { top: '#0b1236', hor: '#2c3570', sun: '#9db2ff', sunI: 0.7, sky: '#5b6cb8', gnd: '#2e2c40', hemiI: 1.0, night: 1 };
+const KEYS: Key[] = [
+  { h: 0, ...NIGHT },
+  { h: 4.6, ...NIGHT },
+  { h: 5.4, top: '#25407e', hor: '#7a86c8', sun: '#a9b8ff', sunI: 0.6, sky: '#7d8fd6', gnd: '#3a3650', hemiI: 0.95, night: 0.8 }, // dawn blue hour
+  { h: 6.2, top: '#5a76b8', hor: '#ffb08a', sun: '#ff9f6b', sunI: 1.5, sky: '#f3c3b0', gnd: '#9c8470', hemiI: 0.95, night: 0.3 },
+  { h: 7.6, top: '#5aa9ef', hor: '#cde9ff', sun: '#fff0d6', sunI: 2.6, sky: '#cfe8ff', gnd: '#cdb894', hemiI: 1.15, night: 0 },
+  { h: 12, top: '#3f9be8', hor: '#c6e6ff', sun: '#fff6e6', sunI: 3.0, sky: '#d6ecff', gnd: '#d4c3a0', hemiI: 1.25, night: 0 },
+  { h: 16.3, top: '#4a9ee6', hor: '#ffe6c8', sun: '#ffe2b0', sunI: 2.7, sky: '#e6e6f0', gnd: '#d4c09a', hemiI: 1.12, night: 0 },
+  { h: 17.5, top: '#6d8fd0', hor: '#ffc27a', sun: '#ffb35c', sunI: 2.4, sky: '#ffd8a8', gnd: '#b08a62', hemiI: 1.0, night: 0 }, // golden hour
+  { h: 18.35, top: '#4b5fa8', hor: '#ff8a5c', sun: '#ff7a3d', sunI: 1.3, sky: '#e8a08a', gnd: '#6e5060', hemiI: 0.9, night: 0.35 },
+  { h: 19.1, top: '#1f3a7a', hor: '#5873bf', sun: '#7aa0ff', sunI: 0.55, sky: '#6f8fd8', gnd: '#30304a', hemiI: 1.0, night: 0.85 }, // blue hour
+  { h: 20.5, ...NIGHT },
+  { h: 24, ...NIGHT },
+];
+
+const DOME_VS = `varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = modelViewMatrix * vec4(position,1.0); gl_Position = projectionMatrix * p; gl_Position.z = gl_Position.w; }`;
+const DOME_FS = `uniform vec3 top; uniform vec3 hor; uniform vec3 sunDir; uniform vec3 sunCol; varying vec3 vDir;
+void main(){ float y = vDir.y; vec3 c = mix(hor, top, smoothstep(-0.05, 0.55, y)); c = mix(c, hor * 0.85, smoothstep(0.0, -0.3, y));
+ float s = max(dot(normalize(vDir), sunDir), 0.0); c += sunCol * (pow(s, 12.0) * 0.35 + pow(s, 400.0) * 1.2);
+ gl_FragColor = vec4(c, 1.0);
+#include <tonemapping_fragment>
+ #include <colorspace_fragment>
+}`;
+
+export class Sky {
+  sun = new THREE.DirectionalLight('#fff4e0', 2.6);
+  hemi = new THREE.HemisphereLight('#cfe8ff', '#d4c3a0', 1.2);
+  private dome: THREE.Mesh;
+  private uni = { top: { value: new THREE.Color() }, hor: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3(0, 1, 0) }, sunCol: { value: new THREE.Color() } };
+  private stars: THREE.Points;
+  private sunDisc: THREE.Mesh;
+  private moonDisc: THREE.Mesh;
+  private fog = new THREE.Fog('#c6e6ff', 70, 230);
+  private rain: THREE.LineSegments;
+  private rainOn = 0; private rainTarget = 0;
+  private fw: THREE.Points;
+  private fwData: { p: Float32Array; v: Float32Array; c: Float32Array; base: Float32Array; life: Float32Array; kind: Uint8Array };
+  private fwTimer = 0; private fwNext = 0;
+  private center = new THREE.Vector3();
+  private night = 0;
+  private tmpB = new THREE.Color();
+
+  constructor(private scene: THREE.Scene, _renderer: THREE.WebGLRenderer) {
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    const c = this.sun.shadow.camera; c.left = -34; c.right = 34; c.top = 34; c.bottom = -34; c.near = 1; c.far = 160;
+    this.sun.shadow.bias = -0.0004; this.sun.shadow.normalBias = 0.03;
+    scene.add(this.sun, this.sun.target, this.hemi);
+    scene.fog = this.fog;
+    scene.background = new THREE.Color('#c6e6ff');
+
+    this.dome = new THREE.Mesh(new THREE.SphereGeometry(320, 32, 16), new THREE.ShaderMaterial({ uniforms: this.uni, vertexShader: DOME_VS, fragmentShader: DOME_FS, side: THREE.BackSide, depthWrite: false, fog: false }));
+    this.dome.renderOrder = -10; this.dome.frustumCulled = false;
+    scene.add(this.dome);
+
+    const sp = new Float32Array(1500 * 3);
+    for (let i = 0; i < 1500; i++) {
+      const v = new THREE.Vector3().randomDirection(); v.y = Math.abs(v.y) * 0.9 + 0.05; v.normalize().multiplyScalar(300);
+      sp.set([v.x, v.y, v.z], i * 3);
+    }
+    const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
+    this.stars = new THREE.Points(sg, new THREE.PointsMaterial({ color: '#ffffff', size: 1.6, sizeAttenuation: false, transparent: true, opacity: 0, fog: false, depthWrite: false }));
+    this.stars.frustumCulled = false;
+    this.dome.add(this.stars);
+    this.sunDisc = new THREE.Mesh(new THREE.CircleGeometry(12, 32), new THREE.MeshBasicMaterial({ color: '#fff6d8', fog: false, transparent: true, toneMapped: false }));
+    this.moonDisc = new THREE.Mesh(new THREE.CircleGeometry(8, 32), new THREE.MeshBasicMaterial({ color: '#e8eeff', fog: false, transparent: true, toneMapped: false }));
+    this.dome.add(this.sunDisc, this.moonDisc);
+
+    // rain: streaks in a box around the player
+    const N = 1800;
+    const rp = new Float32Array(N * 6);
+    for (let i = 0; i < N; i++) { const x = (Math.random() - 0.5) * 50, y = Math.random() * 25, z = (Math.random() - 0.5) * 50; rp.set([x, y, z, x + 0.05, y + 0.7, z], i * 6); }
+    const rg = new THREE.BufferGeometry(); rg.setAttribute('position', new THREE.BufferAttribute(rp, 3));
+    this.rain = new THREE.LineSegments(rg, new THREE.LineBasicMaterial({ color: '#cfe3ff', transparent: true, opacity: 0, depthWrite: false }));
+    this.rain.frustumCulled = false; rg.setDrawRange(0, 0); // always rendered → program compiled up front, no hitch when rain starts
+    scene.add(this.rain);
+
+    // fireworks particle pool
+    const F = 5000;
+    this.fwData = { p: new Float32Array(F * 3), v: new Float32Array(F * 3), c: new Float32Array(F * 3), base: new Float32Array(F * 3), life: new Float32Array(F), kind: new Uint8Array(F) };
+    const fg = new THREE.BufferGeometry();
+    fg.setAttribute('position', new THREE.BufferAttribute(this.fwData.p, 3));
+    fg.setAttribute('color', new THREE.BufferAttribute(this.fwData.c, 3));
+    this.fw = new THREE.Points(fg, new THREE.PointsMaterial({ size: 0.9, vertexColors: true, map: RADIAL, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, toneMapped: false }));
+    this.fw.frustumCulled = false; fg.setDrawRange(0, 0);
+    scene.add(this.fw);
+  }
+
+  /** Returns night amount 0..1 and applies lighting for the time of day. */
+  setTime(minute: number): number {
+    const h = ((minute / 60) % 24 + 24) % 24;
+    let i = 0;
+    while (i < KEYS.length - 2 && KEYS[i + 1].h <= h) i++;
+    const a = KEYS[i], b = KEYS[i + 1];
+    const t = THREE.MathUtils.smoothstep(h, a.h, b.h);
+    const mix = (x: string, y: string, out: THREE.Color) => out.set(x).lerp(this.tmpB.set(y), t);
+    const rain = this.rainOn;
+    const grey = new THREE.Color('#8d97a3');
+    mix(a.top, b.top, this.uni.top.value).lerp(grey.clone().multiplyScalar(1 - 0.6 * this.night), rain * 0.7);
+    mix(a.hor, b.hor, this.uni.hor.value).lerp(grey, rain * 0.6);
+    mix(a.sun, b.sun, this.uni.sunCol.value);
+    this.sun.color.copy(this.uni.sunCol.value);
+    this.sun.intensity = THREE.MathUtils.lerp(a.sunI, b.sunI, t) * (1 - rain * 0.6);
+    mix(a.sky, b.sky, this.hemi.color);
+    mix(a.gnd, b.gnd, this.hemi.groundColor);
+    this.hemi.intensity = THREE.MathUtils.lerp(a.hemiI, b.hemiI, t) * (1 - rain * 0.2);
+    this.night = THREE.MathUtils.lerp(a.night, b.night, t);
+    // sun arc 6:00 → 18:30; moon opposite
+    const ang = ((h - 6) / 12.5) * Math.PI;
+    const sunDir = new THREE.Vector3(-Math.cos(ang) * 0.85, Math.sin(ang), 0.45).normalize();
+    this.uni.sunDir.value.copy(sunDir);
+    this.sunDisc.position.copy(sunDir).multiplyScalar(290); this.sunDisc.lookAt(0, 0, 0);
+    (this.sunDisc.material as THREE.MeshBasicMaterial).opacity = THREE.MathUtils.clamp(sunDir.y * 6 + 0.3, 0, 1) * (1 - rain);
+    const moonDir = new THREE.Vector3(Math.cos(ang) * 0.7, -Math.sin(ang) * 0.9 + 0.15, -0.5).normalize();
+    this.moonDisc.position.copy(moonDir).multiplyScalar(285); this.moonDisc.lookAt(0, 0, 0);
+    (this.moonDisc.material as THREE.MeshBasicMaterial).opacity = THREE.MathUtils.clamp(moonDir.y * 5, 0, 1) * this.night * (1 - rain);
+    // light direction: sun by day, moon by night (keep it fairly high so shadows stay readable)
+    const L = this.night > 0.6 ? moonDir : sunDir;
+    this.lightDir.set(L.x, Math.max(0.35, L.y), L.z).normalize();
+    (this.stars.material as THREE.PointsMaterial).opacity = this.night * (1 - rain);
+    this.fog.color.copy(this.uni.hor.value).lerp(this.uni.top.value, 0.25);
+    this.fog.near = THREE.MathUtils.lerp(70, 25, rain); this.fog.far = THREE.MathUtils.lerp(240, 130, rain);
+    (this.scene.background as THREE.Color).copy(this.fog.color);
+    return this.night;
+  }
+  private lightDir = new THREE.Vector3(0.3, 1, 0.4);
+
+  setRain(on: boolean): void { this.rainTarget = on ? 1 : 0; }
+
+  fireworks(seconds: number): void { this.fwTimer = Math.max(this.fwTimer, seconds); this.fw.geometry.setDrawRange(0, Infinity); }
+
+  setQuality(q: 'low' | 'medium' | 'high'): void {
+    const size = q === 'high' ? 2048 : 1024;
+    if (this.sun.shadow.mapSize.x !== size) {
+      this.sun.shadow.mapSize.set(size, size);
+      this.sun.shadow.map?.dispose(); this.sun.shadow.map = null as any;
+    }
+    this.sun.castShadow = q !== 'low';
+  }
+
+  update(dt: number, playerPos: THREE.Vector3): void {
+    this.center.copy(playerPos);
+    this.dome.position.copy(playerPos);
+    // shadow camera follows the player, snapped to texels to avoid shimmering
+    const step = 68 / this.sun.shadow.mapSize.x;
+    const cx = Math.round(playerPos.x / step) * step, cz = Math.round(playerPos.z / step) * step;
+    this.sun.target.position.set(cx, 0, cz);
+    this.sun.position.set(cx, 0, cz).addScaledVector(this.lightDir, 70);
+    // rain
+    this.rainOn += (this.rainTarget - this.rainOn) * Math.min(1, dt * 0.5);
+    const raining = this.rainOn > 0.02;
+    this.rain.geometry.setDrawRange(0, raining ? Infinity : 0);
+    if (raining) {
+      (this.rain.material as THREE.LineBasicMaterial).opacity = 0.55 * this.rainOn;
+      this.rain.position.set(playerPos.x, 0, playerPos.z);
+      const a = this.rain.geometry.attributes.position.array as Float32Array;
+      for (let i = 0; i < a.length; i += 6) {
+        a[i + 1] -= 24 * dt; a[i + 4] -= 24 * dt;
+        if (a[i + 1] < 0) { a[i + 1] += 25; a[i + 4] += 25; }
+      }
+      this.rain.geometry.attributes.position.needsUpdate = true;
+    }
+    this.updateFireworks(dt);
+  }
+
+  private fwIdle = true;
+  private updateFireworks(dt: number): void {
+    if (this.fwIdle && this.fwTimer <= 0) return; // nothing alive: skip the 5000-particle loop
+    this.fwIdle = false;
+    const d = this.fwData;
+    if (this.fwTimer > 0) {
+      this.fwTimer -= dt; this.fwNext -= dt;
+      if (this.fwNext <= 0) { this.fwNext = 0.25 + Math.random() * 0.45; this.launch(); }
+    }
+    let alive = 0;
+    for (let i = 0; i < d.life.length; i++) {
+      if (d.life[i] <= 0) continue;
+      alive++;
+      d.life[i] -= dt;
+      const k = i * 3;
+      if (d.kind[i] === 1) {
+        // rocket: explode when it runs out of fuel
+        d.v[k + 1] -= 4 * dt;
+        if (d.life[i] <= 0) this.burst(d.p[k], d.p[k + 1], d.p[k + 2]);
+      } else {
+        d.v[k] *= 1 - dt * 1.2; d.v[k + 2] *= 1 - dt * 1.2; d.v[k + 1] = d.v[k + 1] * (1 - dt * 1.2) - 5 * dt;
+      }
+      d.p[k] += d.v[k] * dt; d.p[k + 1] += d.v[k + 1] * dt; d.p[k + 2] += d.v[k + 2] * dt;
+      const f = d.kind[i] === 1 ? 1 : Math.min(1, d.life[i] / 1.2) * (0.7 + Math.random() * 0.3);
+      d.c[k] = d.base[k] * f; d.c[k + 1] = d.base[k + 1] * f; d.c[k + 2] = d.base[k + 2] * f;
+      if (d.life[i] <= 0) { d.c[k] = d.c[k + 1] = d.c[k + 2] = 0; }
+    }
+    this.fw.geometry.attributes.position.needsUpdate = true;
+    this.fw.geometry.attributes.color.needsUpdate = true;
+    if (!alive && this.fwTimer <= 0) { this.fw.geometry.setDrawRange(0, 0); this.fwIdle = true; }
+  }
+
+  private alloc(): number { const L = this.fwData.life; for (let i = 0; i < L.length; i++) if (L[i] <= 0) return i; return -1; }
+
+  private launch(): void {
+    const i = this.alloc(); if (i < 0) return;
+    const d = this.fwData, k = i * 3;
+    const ang = Math.random() * Math.PI * 2, rad = 12 + Math.random() * 22;
+    d.p.set([this.center.x + Math.cos(ang) * rad, 2, this.center.z + Math.sin(ang) * rad], k);
+    d.v.set([(Math.random() - 0.5) * 3, 24 + Math.random() * 8, (Math.random() - 0.5) * 3], k);
+    d.base.set([1, 0.85, 0.6], k);
+    d.life[i] = 1.0 + Math.random() * 0.4; d.kind[i] = 1;
+  }
+
+  private burst(x: number, y: number, z: number): void {
+    const d = this.fwData;
+    const col = new THREE.Color().setHSL(Math.random(), 0.9, 0.6);
+    const col2 = new THREE.Color().setHSL(Math.random(), 0.9, 0.65);
+    const n = 140 + Math.floor(Math.random() * 90), sp = 9 + Math.random() * 6;
+    for (let j = 0; j < n; j++) {
+      const i = this.alloc(); if (i < 0) return;
+      const v = new THREE.Vector3().randomDirection().multiplyScalar(sp * (0.85 + Math.random() * 0.15));
+      const k = i * 3;
+      d.p.set([x, y, z], k); d.v.set([v.x, v.y, v.z], k);
+      const c = j % 3 === 0 ? col2 : col;
+      d.base.set([c.r * 2, c.g * 2, c.b * 2], k);
+      d.life[i] = 1.6 + Math.random() * 0.9; d.kind[i] = 0;
+    }
+  }
+}
