@@ -2,26 +2,26 @@
 import * as THREE from 'three';
 import { audio } from '../audio/audio';
 import { Avatar } from '../core/state';
-import { Character } from '../engine/character';
+import { Character, FACE_STYLE_NAMES, HAIR_STYLE_NAMES, UNIFORM_STYLE_NAMES } from '../engine/character';
 import { el, esc } from './dom';
+import './creator.css';
 
 const SKINS = ['#ffdbac', '#f5d0b0', '#f1c27d', '#e0ac69', '#c68642', '#8d5524', '#5c3a21'];
 const HAIRS = ['#1b1b1b', '#2b1d14', '#5a3825', '#a0522d', '#d4a373', '#f2d16b', '#7b7b7b', '#e85d75', '#3d7dd8', '#3d2b56'];
 const SHIRTS = ['#ffffff', '#e63946', '#ff8a5c', '#ffc93c', '#2ec27e', '#3fa7ff', '#2b2d42', '#9b5de5', '#ff6fa8', '#1d3557'];
-const HAIR_STYLES = ['Short', 'Spiky', 'Long', 'Bun', 'Bald'];
 const NAMES: Record<string, string> = {
   '#ffdbac': 'Porcelain', '#f5d0b0': 'Peach', '#f1c27d': 'Honey', '#e0ac69': 'Golden', '#c68642': 'Caramel', '#8d5524': 'Chestnut', '#5c3a21': 'Espresso',
   '#1b1b1b': 'Black', '#2b1d14': 'Dark brown', '#5a3825': 'Brown', '#a0522d': 'Auburn', '#d4a373': 'Light brown', '#f2d16b': 'Blond', '#7b7b7b': 'Grey', '#e85d75': 'Pink', '#3d7dd8': 'Blue', '#3d2b56': 'Plum',
   '#ffffff': 'White', '#e63946': 'Red', '#ff8a5c': 'Salmon', '#ffc93c': 'Yellow', '#2ec27e': 'Green', '#2b2d42': 'Navy', '#9b5de5': 'Purple', '#ff6fa8': 'Rose', '#1d3557': 'Indigo',
 };
-const HEADWEAR = ['None', 'Chef Hat', 'Headband', 'Cap'];
+const HEADWEAR = ['None', 'Chef cap', 'Headband', 'Cap'];
 
 let renderer: THREE.WebGLRenderer | null = null;
 
 export interface Creator { el: HTMLElement; avatar: Avatar; name: string; company: string; dispose(): void }
 
 export function makeCreator(initial: Avatar, opts: { name?: string; company?: string; showNames: boolean }): Creator {
-  const avatar: Avatar = { ...initial };
+  const avatar: Avatar = { ...initial, faceStyle: initial.faceStyle ?? 0, uniformStyle: initial.uniformStyle ?? 0 };
   const c: Creator = { el: el('div', 'creator'), avatar, name: opts.name ?? '', company: opts.company ?? '', dispose };
 
   // --- 3D preview
@@ -62,7 +62,7 @@ export function makeCreator(initial: Avatar, opts: { name?: string; company?: st
   loop();
 
   // --- controls
-  const form = el('div', 'grid');
+  const form = el('div', 'grid creator-options');
   const sw = (key: keyof Avatar, list: string[], label: string) =>
     `<div><h4>${label}</h4><div class="swatches">${list.map((v) => `<button class="sw ${avatar[key] === v ? 'on' : ''}" style="background:${v}" data-k="${key}" data-v="${v}" aria-pressed="${avatar[key] === v}" aria-label="${label}: ${NAMES[v] ?? v}" title="${NAMES[v] ?? v}"></button>`).join('')}</div></div>`;
   const opt = (key: keyof Avatar, list: string[], label: string) =>
@@ -71,8 +71,9 @@ export function makeCreator(initial: Avatar, opts: { name?: string; company?: st
     form.innerHTML = (opts.showNames ? `<div class="grid g2">
         <label class="field">Chef name<input type="text" maxlength="18" id="cr-name" value="${esc(c.name)}" placeholder="Your name"></label>
         <label class="field">Company name<input type="text" maxlength="24" id="cr-co" value="${esc(c.company)}" placeholder="Sushi Empire"></label></div>` : '') +
-      sw('skin', SKINS, 'Skin tone') + opt('hairStyle', HAIR_STYLES, 'Hair style') + sw('hair', HAIRS, 'Hair color') +
-      sw('shirt', SHIRTS, 'Shirt') + opt('headwear', HEADWEAR, 'Headwear');
+      sw('skin', SKINS, 'Skin tone') + opt('faceStyle', FACE_STYLE_NAMES, 'Face') +
+      opt('hairStyle', HAIR_STYLE_NAMES, 'Hair style') + sw('hair', HAIRS, 'Hair color') +
+      sw('shirt', SHIRTS, 'Chef jacket') + opt('uniformStyle', UNIFORM_STYLE_NAMES, 'Apron') + opt('headwear', HEADWEAR, 'Headwear');
     form.querySelector<HTMLInputElement>('#cr-name')?.addEventListener('input', (e) => { c.name = (e.target as HTMLInputElement).value; });
     form.querySelector<HTMLInputElement>('#cr-co')?.addEventListener('input', (e) => { c.company = (e.target as HTMLInputElement).value; });
   };
@@ -89,13 +90,18 @@ export function makeCreator(initial: Avatar, opts: { name?: string; company?: st
     form.querySelector<HTMLElement>(sel)?.focus();
   });
   render();
-  const left = el('div', 'grid');
-  left.style.alignContent = 'start';
+  const left = el('div', 'grid creator-preview');
   left.append(canvas);
   const rnd = el('button', 'btn small ghost', 'Randomize');
   rnd.onclick = () => {
     const p = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
-    Object.assign(avatar, { skin: p(SKINS), hair: p(HAIRS), shirt: p(SHIRTS), hairStyle: Math.floor(Math.random() * 5), headwear: Math.floor(Math.random() * 4) });
+    Object.assign(avatar, {
+      skin: p(SKINS), hair: p(HAIRS), shirt: p(SHIRTS),
+      hairStyle: Math.floor(Math.random() * HAIR_STYLE_NAMES.length),
+      faceStyle: Math.floor(Math.random() * FACE_STYLE_NAMES.length),
+      uniformStyle: Math.floor(Math.random() * UNIFORM_STYLE_NAMES.length),
+      headwear: Math.floor(Math.random() * HEADWEAR.length),
+    });
     ch.setAvatar(avatar); waveT = 1; audio.sfx('pop'); render();
   };
   left.append(rnd);

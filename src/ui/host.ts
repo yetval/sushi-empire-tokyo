@@ -25,6 +25,9 @@ export interface UIHost {
   /** True when the player is standing at the supplier (buying without hotline). */
   atSupplier(): boolean;
   setPaused(p: boolean): void;
+  /** Tycoon time speed: 1, 2 or 4 (sim + NPCs run faster). Pause is separate (setPaused). Keys 1/2/3 also set it. */
+  speed: number;
+  setSpeed(n: 1 | 2 | 4): void;
   /** Visible customer orders at the restaurant the player is in (HUD ticket rail). */
   ordersAtCurrentSite(): OrderView[];
 }

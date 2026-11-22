@@ -112,10 +112,75 @@ export const DISTRICTS: Record<DistrictId, DistrictDef> = {
 };
 export const DISTRICT_IDS = Object.keys(DISTRICTS) as DistrictId[];
 
+// ---------------------------------------------------------------- areas (walkable districts + management-only areas)
+// Walkable districts are 3D scenes. Remote areas (other Tokyo wards, Japan, the world) are run purely from the
+// management UI: their restaurants are simulated by the same economy code, just never rendered.
+export type Region = 'tokyo' | 'japan' | 'world';
+export interface AreaDef {
+  id: string; name: string; jp: string; blurb: string; region: Region; walkable: boolean;
+  traffic: number; elasticity: number; unlock: { pieces: number; cost: number; chapter2?: boolean };
+  mix: Partial<Record<CustomerType, number>>; lotBase: number; // price of the smallest lot
+  map: { x: number; y: number }; // position on the empire map (0..100 within its region)
+}
+const R = (id: string, name: string, jp: string, region: Region, traffic: number, elasticity: number, pieces: number, cost: number, lotBase: number, mix: AreaDef['mix'], blurb: string, x: number, y: number, chapter2 = false): AreaDef =>
+  ({ id, name, jp, region, walkable: false, traffic, elasticity, unlock: { pieces, cost, chapter2 }, mix, lotBase, blurb, map: { x, y } });
+
+export const REMOTE_AREAS: Record<string, AreaDef> = Object.fromEntries([
+  R('ueno', 'Ueno', '上野', 'tokyo', 6, 1.4, 2_000, 60_000, 70_000, { tourist: 3, family: 3, office: 1 }, 'Museums, the zoo and Ameyoko market crowds.', 62, 22),
+  R('ikebukuro', 'Ikebukuro', '池袋', 'tokyo', 7, 1.5, 3_000, 90_000, 90_000, { student: 4, office: 2, influencer: 1 }, 'Department stores, anime shops and students.', 30, 16),
+  R('akihabara', 'Akihabara', '秋葉原', 'tokyo', 6.5, 1.6, 5_000, 150_000, 120_000, { student: 4, tourist: 3 }, 'Electric Town: quick, cheap and late-night.', 60, 32),
+  R('harajuku', 'Harajuku', '原宿', 'tokyo', 7, 1.7, 8_000, 250_000, 200_000, { student: 4, influencer: 3, tourist: 2 }, 'Takeshita Street trends. Photogenic sushi sells.', 34, 52),
+  R('shimokita', 'Shimokitazawa', '下北沢', 'tokyo', 4.5, 1.3, 15_000, 300_000, 180_000, { student: 3, foodie: 3 }, 'Thrift shops, live houses and picky foodies.', 18, 62),
+  R('odaiba', 'Odaiba', 'お台場', 'tokyo', 6, 1.3, 20_000, 600_000, 450_000, { family: 4, tourist: 4 }, 'Waterfront malls and weekend families.', 72, 78),
+  R('roppongi', 'Roppongi', '六本木', 'tokyo', 5, 0.9, 30_000, 1_200_000, 900_000, { wealthy: 3, foodie: 2, tourist: 2 }, 'Nightlife, embassies and expense accounts.', 44, 66),
+  R('tsukiji', 'Tsukiji Outer Market', '築地', 'tokyo', 5.5, 1.0, 40_000, 1_000_000, 800_000, { foodie: 5, tourist: 3 }, 'The fish-lover pilgrimage. Quality is everything.', 64, 60),
+  R('osaka_namba', 'Osaka · Namba', '難波', 'japan', 8, 1.3, 150_000, 6_000_000, 3_000_000, { tourist: 3, family: 3, student: 2 }, 'Kuidaore! Big appetites, loud neon.', 48, 62),
+  R('kyoto_gion', 'Kyoto · Gion', '祇園', 'japan', 5, 0.8, 250_000, 12_000_000, 6_000_000, { tourist: 4, wealthy: 2, foodie: 2 }, 'Lantern-lit lanes and refined palates.', 54, 56),
+  R('sapporo', 'Sapporo', '札幌', 'japan', 6, 1.2, 400_000, 18_000_000, 8_000_000, { family: 3, foodie: 3, tourist: 2 }, 'Hokkaido seafood country.', 70, 12),
+  R('fukuoka', 'Fukuoka', '福岡', 'japan', 6.5, 1.3, 600_000, 22_000_000, 9_000_000, { office: 3, student: 2, foodie: 2 }, 'Yatai stalls and Kyushu hospitality.', 22, 80),
+  R('nyc_midtown', 'New York · Midtown', 'ニューヨーク', 'world', 9, 1.1, 1_000_000, 150_000_000, 60_000_000, { office: 4, tourist: 3, wealthy: 2 }, 'Lunch-hour lines around the block.', 22, 34, true),
+  R('london_soho', 'London · Soho', 'ロンドン', 'world', 7, 1.0, 2_000_000, 250_000_000, 90_000_000, { office: 3, foodie: 3, tourist: 2 }, 'Theatre crowds and food critics.', 46, 26, true),
+  R('paris_marais', 'Paris · Le Marais', 'パリ', 'world', 6, 0.8, 4_000_000, 400_000_000, 140_000_000, { foodie: 4, wealthy: 2, tourist: 3 }, 'Gastronomes who know their toro.', 48, 32, true),
+  R('seoul_gangnam', 'Seoul · Gangnam', 'ソウル', 'world', 8, 1.3, 1_500_000, 180_000_000, 70_000_000, { student: 3, influencer: 3, office: 2 }, 'Trend-setters and late-night K-food fans.', 80, 30, true),
+  R('singapore_marina', 'Singapore · Marina Bay', 'シンガポール', 'world', 7, 1.0, 6_000_000, 600_000_000, 200_000_000, { wealthy: 3, tourist: 3, office: 2 }, 'Skyline dining for the jet set.', 74, 58, true),
+  R('dubai_marina', 'Dubai · Marina', 'ドバイ', 'world', 5, 0.6, 10_000_000, 1_000_000_000, 350_000_000, { wealthy: 6, tourist: 2 }, 'Gold-leaf nigiri, no budget.', 60, 44, true),
+].map((a) => [a.id, a]));
+
+/** Every area id (walkable districts first). */
+export type AreaId = DistrictId | string;
+export const AREAS: Record<string, AreaDef> = {
+  ...Object.fromEntries(DISTRICT_IDS.map((d, i) => [d, { ...DISTRICTS[d], region: 'tokyo' as Region, walkable: true, lotBase: [45_000, 300_000, 1_200_000, 4_000_000][i], map: [{ x: 64, y: 30 }, { x: 36, y: 46 }, { x: 32, y: 34 }, { x: 56, y: 48 }][i] }])),
+  ...REMOTE_AREAS,
+};
+export const AREA_IDS = Object.keys(AREAS);
+export const areaDef = (id: string): AreaDef => AREAS[id];
+export const isWalkable = (id: string): id is DistrictId => (DISTRICT_IDS as string[]).includes(id);
+
+// ---------------------------------------------------------------- restaurant concepts (formats)
+export type ConceptId = 'stand' | 'kiosk' | 'bar' | 'kaiten' | 'omakase' | 'ghost';
+export interface ConceptDef {
+  id: ConceptId; name: string; jp: string; emoji: string; desc: string;
+  traffic: number; elasticity: number; price: number; // bill multiplier (the concept's price level)
+  cook: number; quality: number; staff: number; // chef-slot multiplier
+  rent: number; fitout: number; // fit-out cost as a fraction of the lot price
+  walkIn: boolean; needsServer: boolean; unlockPieces: number;
+  mix?: Partial<Record<CustomerType, number>>;
+}
+export const CONCEPTS: Record<ConceptId, ConceptDef> = {
+  stand: { id: 'stand', name: 'Yatai Stand', jp: '屋台', emoji: '🏮', desc: 'A street stand. Cheap, charming and personal.', traffic: 1, elasticity: 1, price: 1, cook: 1, quality: 0, staff: 1, rent: 1, fitout: 0, walkIn: true, needsServer: true, unlockPieces: 0 },
+  kiosk: { id: 'kiosk', name: 'Takeout Kiosk', jp: '持ち帰り', emoji: '🥡', desc: 'Grab-and-go packs. Fast, cheap, high volume, price-sensitive.', traffic: 1.35, elasticity: 1.35, price: 0.85, cook: 1.35, quality: -0.05, staff: 1, rent: 0.7, fitout: 0.15, walkIn: true, needsServer: true, unlockPieces: 0, mix: { student: 2, office: 2 } },
+  bar: { id: 'bar', name: 'Sushi Bar', jp: '寿司屋', emoji: '🍣', desc: 'The classic counter. Balanced in every way.', traffic: 1, elasticity: 1, price: 1, cook: 1, quality: 0, staff: 1, rent: 1, fitout: 0.2, walkIn: true, needsServer: true, unlockPieces: 0 },
+  kaiten: { id: 'kaiten', name: 'Kaiten Conveyor', jp: '回転寿司', emoji: '🔄', desc: 'Plates circle on a belt. Huge volume, low prices, needs big kitchens.', traffic: 1.7, elasticity: 1.5, price: 0.8, cook: 1.45, quality: -0.08, staff: 1.5, rent: 1.15, fitout: 0.35, walkIn: true, needsServer: true, unlockPieces: 5_000, mix: { family: 3, student: 2 } },
+  omakase: { id: 'omakase', name: 'Omakase Room', jp: 'おまかせ', emoji: '🎎', desc: 'Chef’s choice for a handful of guests. Tiny volume, enormous bills, needs master chefs.', traffic: 0.4, elasticity: 0.45, price: 2.6, cook: 0.7, quality: 0.12, staff: 0.75, rent: 1.25, fitout: 0.5, walkIn: true, needsServer: true, unlockPieces: 50_000, mix: { wealthy: 4, foodie: 3, critic: 0.3 } },
+  ghost: { id: 'ghost', name: 'Ghost Kitchen', jp: 'デリバリー', emoji: '🛵', desc: 'Delivery-only kitchen. No dining room, no servers, cheap rent.', traffic: 1.1, elasticity: 1.2, price: 0.95, cook: 1.15, quality: -0.03, staff: 1.25, rent: 0.45, fitout: 0.25, walkIn: false, needsServer: false, unlockPieces: 10_000, mix: { office: 2, student: 2 } },
+};
+export const CONCEPT_IDS = Object.keys(CONCEPTS) as ConceptId[];
+
+
 export type RestaurantKind = 'stand' | 'shop' | 'restaurant' | 'flagship';
 
 export interface PropertyDef {
-  id: string; district: DistrictId; name: string; kind: RestaurantKind;
+  id: string; district: AreaId; name: string; kind: RestaurantKind;
   price: number; rent: number; // per day
   size: number; // traffic multiplier
   seatsMax: number; chefSlots: number; serverSlots: number;
@@ -132,6 +197,26 @@ export const PROPERTIES: Record<string, PropertyDef> = {
   ginza_omakase: { id: 'ginza_omakase', district: 'ginza', name: 'Ginza Omakase Room', kind: 'restaurant', price: 9_000_000, rent: 120_000, size: 4, seatsMax: 10, chefSlots: 4, serverSlots: 2 },
   ginza_flagship: { id: 'ginza_flagship', district: 'ginza', name: 'Golden Koi Flagship', kind: 'flagship', price: 30_000_000, rent: 320_000, size: 9, seatsMax: 20, chefSlots: 8, serverSlots: 4 },
 };
+// more walkable lots (placed in the 3D districts)
+Object.assign(PROPERTIES, {
+  asakusa_alley: { id: 'asakusa_alley', district: 'asakusa', name: 'Lantern Alley Counter', kind: 'shop', price: 90_000, rent: 1_800, size: 2.4, seatsMax: 8, chefSlots: 2, serverSlots: 1 },
+  asakusa_market: { id: 'asakusa_market', district: 'asakusa', name: 'Nakamise Market Hall', kind: 'restaurant', price: 320_000, rent: 5_500, size: 3.6, seatsMax: 14, chefSlots: 4, serverSlots: 2 },
+  shibuya_alley: { id: 'shibuya_alley', district: 'shibuya', name: 'Nonbei Yokocho Nook', kind: 'shop', price: 300_000, rent: 6_500, size: 2.6, seatsMax: 8, chefSlots: 2, serverSlots: 1 },
+  shibuya_scramble: { id: 'shibuya_scramble', district: 'shibuya', name: 'Scramble Square Sushi', kind: 'restaurant', price: 950_000, rent: 17_000, size: 4.2, seatsMax: 16, chefSlots: 5, serverSlots: 3 },
+  shinjuku_omoide: { id: 'shinjuku_omoide', district: 'shinjuku', name: 'Omoide Lane Stall', kind: 'shop', price: 1_100_000, rent: 18_000, size: 3.2, seatsMax: 8, chefSlots: 3, serverSlots: 1 },
+  shinjuku_station: { id: 'shinjuku_station', district: 'shinjuku', name: 'West Exit Sushi Station', kind: 'restaurant', price: 3_200_000, rent: 45_000, size: 5.5, seatsMax: 16, chefSlots: 6, serverSlots: 3 },
+  ginza_corner: { id: 'ginza_corner', district: 'ginza', name: 'Chuo-dori Corner', kind: 'shop', price: 4_500_000, rent: 70_000, size: 3.2, seatsMax: 10, chefSlots: 3, serverSlots: 2 },
+  ginza_tower: { id: 'ginza_tower', district: 'ginza', name: 'Ginza Six Sky Sushi', kind: 'restaurant', price: 15_000_000, rent: 190_000, size: 6, seatsMax: 16, chefSlots: 6, serverSlots: 3 },
+} satisfies Record<string, PropertyDef>);
+// management-only lots: three per remote area (small / mid / large)
+for (const a of Object.values(REMOTE_AREAS)) {
+  const tiers = [['shop', 'Sushi Counter', 1, 2.5, 3, 1], ['restaurant', 'Sushi House', 3.2, 4, 5, 2], ['flagship', 'Grand Sushi Hall', 9, 6.5, 8, 3]] as const;
+  tiers.forEach(([kind, label, pm, size, chefs, servers], i) => {
+    const id = `${a.id}_${i + 1}`;
+    const price = Math.round(a.lotBase * pm);
+    PROPERTIES[id] = { id, district: a.id, name: `${a.name.split(' · ').pop()} ${label}`, kind, price, rent: Math.round(price * 0.02), size, seatsMax: 6 + 4 * (i + 1), chefSlots: chefs, serverSlots: servers };
+  });
+}
 export const PROPERTY_IDS = Object.keys(PROPERTIES);
 
 // ---------------------------------------------------------------- upgrades (per restaurant)
@@ -166,10 +251,10 @@ export type Role = 'chef' | 'server' | 'cleaner' | 'manager';
 export interface RoleDef { id: Role; name: string; emoji: string; baseWage: number; hireCost: number; desc: string; unlockPieces: number }
 
 export const ROLES: Record<Role, RoleDef> = {
-  chef: { id: 'chef', name: 'Sushi Chef', emoji: '👨‍🍳', baseWage: 900, hireCost: 3_000, desc: 'Cooks accepted orders automatically. Skill = speed & quality.', unlockPieces: 50 },
-  server: { id: 'server', name: 'Server / Cashier', emoji: '🧑‍💼', baseWage: 700, hireCost: 2_000, desc: 'Takes orders and serves food. Chef + Server = full automation.', unlockPieces: 50 },
-  cleaner: { id: 'cleaner', name: 'Cleaner', emoji: '🧹', baseWage: 500, hireCost: 2_000, desc: 'Keeps the restaurant spotless. Dirty restaurants lose guests.', unlockPieces: 300 },
-  manager: { id: 'manager', name: 'Manager', emoji: '📋', baseWage: 3_000, hireCost: 25_000, desc: 'Runs the place while you are away: offline earnings and auto-restock.', unlockPieces: 3_000 },
+  chef: { id: 'chef', name: 'Sushi Chef', emoji: '👨‍🍳', baseWage: 900, hireCost: 3_000, desc: 'Cooks accepted orders automatically. Skill = speed & quality.', unlockPieces: 0 },
+  server: { id: 'server', name: 'Server / Cashier', emoji: '🧑‍💼', baseWage: 700, hireCost: 2_000, desc: 'Takes orders and serves food. Chef + Server = full automation.', unlockPieces: 0 },
+  cleaner: { id: 'cleaner', name: 'Cleaner', emoji: '🧹', baseWage: 500, hireCost: 2_000, desc: 'Keeps the restaurant spotless. Dirty restaurants lose guests.', unlockPieces: 0 },
+  manager: { id: 'manager', name: 'Manager', emoji: '📋', baseWage: 3_000, hireCost: 25_000, desc: 'Runs the place while you are away: offline earnings, auto-restock, and auto-hire / smart-pricing policies.', unlockPieces: 500 },
 };
 
 export function wageFor(role: Role, skill: number): number {
@@ -216,6 +301,7 @@ export const RESEARCH: Record<string, ResearchDef> = {
   training_program: { id: 'training_program', name: 'Training Program', emoji: '🎓', branch: 'staff', cost: 20, requires: [], minPieces: 0, desc: 'Staff training costs 30% less.' },
   uniforms: { id: 'uniforms', name: 'Smart Uniforms', emoji: '👘', branch: 'staff', cost: 60, requires: ['training_program'], minPieces: 0, desc: '+5% guest satisfaction.' },
   career_ladder: { id: 'career_ladder', name: 'Career Ladder', emoji: '📈', branch: 'staff', cost: 1_500, requires: ['uniforms'], minPieces: 20_000, desc: 'Staff gain experience 2x faster.' },
+  ops_center: { id: 'ops_center', name: 'Operations Center', emoji: '🗂️', branch: 'staff', cost: 120, requires: ['training_program'], minPieces: 2_000, desc: 'House rules (auto-hire, smart pricing) at every restaurant, no manager needed.' },
   manager_academy: { id: 'manager_academy', name: 'Manager Academy', emoji: '🏫', branch: 'staff', cost: 4_000, requires: ['career_ladder'], minPieces: 100_000, desc: 'Offline earnings efficiency 50% → 75%, cap 12h.' },
 
   social_media: { id: 'social_media', name: 'Social Media', emoji: '📱', branch: 'marketing', cost: 25, requires: [], minPieces: 0, desc: 'Unlocks Social Media campaigns.' },

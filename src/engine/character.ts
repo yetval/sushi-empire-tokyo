@@ -8,10 +8,19 @@ import { VC_MAT, at, merge, paint, shade } from './geo';
 
 export type Anim = 'idle' | 'walk' | 'run' | 'jump' | 'cook' | 'carry' | 'sit' | 'wave' | 'eat' | 'interact' | 'cheer' | 'angry';
 
-export interface Outfit { apron?: boolean; tie?: string; bag?: string; vest?: string }
+export interface Outfit {
+  apron?: boolean | string;
+  tie?: string; bag?: string; vest?: string; trim?: string;
+  cut?: 'coat' | 'blazer' | 'workwear' | 'knit';
+  glasses?: 'round' | 'square';
+  detail?: 'freckles' | 'stubble' | 'moustache' | 'earrings';
+}
 
 /** Hair style names for 0..8 (UI can show these). */
 export const HAIR_STYLE_NAMES = ['Short', 'Messy', 'Long', 'Bun', 'Bald', 'Bob', 'Ponytail', 'Twin tails', 'Side part'];
+export const FACE_STYLE_NAMES = ['Soft', 'Long', 'Square', 'Tapered', 'Round'];
+export const UNIFORM_STYLE_NAMES = ['Indigo apron', 'Brick apron', 'Canvas apron'];
+const UNIFORMS = ['#344654', '#803c36', '#cbb386'];
 
 const MAT = VC_MAT;
 const HIP = 0.5; // hip pivot height: feet rest exactly on y = 0
@@ -27,15 +36,26 @@ const torus = (r: number, t: number, arc = Math.PI * 2) => new THREE.TorusGeomet
 const lathe = (pts: [number, number][], seg = 10) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), sg(seg));
 
 // ---------------------------------------------------------------- personality
-interface Persona { eye: 0 | 1 | 2; mouth: 0 | 1 | 2 | 3; brow: number; blush: boolean; shoe: string; sole: string; eyeSize: number }
+const FACE = [
+  { width: 0.95, height: 0.96, jaw: 0.91, eyes: 1, brow: 0.15, nose: 1, mouth: 0 },
+  { width: 0.88, height: 1.07, jaw: 0.98, eyes: 0.84, brow: -0.02, nose: 1.25, mouth: 3 },
+  { width: 1.01, height: 0.95, jaw: 1.15, eyes: 0.81, brow: -0.14, nose: 1.12, mouth: 3 },
+  { width: 0.98, height: 1.01, jaw: 0.76, eyes: 1.12, brow: 0.24, nose: 0.83, mouth: 1 },
+  { width: 1.07, height: 0.91, jaw: 1.02, eyes: 1.17, brow: 0.11, nose: 0.91, mouth: 0 },
+] as const;
+
+interface Persona {
+  face: typeof FACE[number]; shoe: string; sole: string; iris: string;
+}
 
 function persona(a: Avatar): Persona {
   let h = 2166136261;
-  for (const ch of `${a.skin}${a.hair}${a.hairStyle}${a.shirt}${a.pants}${a.headwear}`) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
-  const r = () => { h = Math.imul(h ^ (h >>> 15), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); return ((h ^= h >>> 16) >>> 0) / 4294967296; };
+  for (const ch of a.skin + a.hair) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  const ordinal = h >>> 0;
   const shoes: [string, string][] = [['#3b2a20', '#1f1612'], ['#1e1e24', '#111'], ['#f4f1ea', '#d94b3d'], ['#f4f1ea', '#2b5aa8'], ['#7a4a2a', '#2a1a10']];
-  const s = shoes[Math.floor(r() * shoes.length)];
-  return { eye: Math.floor(r() * 3) as Persona['eye'], mouth: Math.floor(r() * 4) as Persona['mouth'], brow: (r() - 0.5) * 0.6, blush: r() < 0.6, shoe: s[0], sole: s[1], eyeSize: 0.9 + r() * 0.25 };
+  const s = shoes[ordinal % shoes.length];
+  const iris = ['#51362c', '#76523a', '#393038', '#48534c'][(ordinal >>> 8) % 4];
+  return { face: FACE[a.faceStyle ?? 0] ?? FACE[0], shoe: s[0], sole: s[1], iris };
 }
 
 // ---------------------------------------------------------------- head (face looks toward +z)
@@ -43,30 +63,75 @@ function capHair(h: string, r = 0.318, theta = 0.5, tilt = -0.28): THREE.BufferG
   return paint(at(new THREE.SphereGeometry(r, sg(14), sg(7, 2), 0, Math.PI * 2, 0, Math.PI * theta), 0, 0.02, -0.015, tilt, 0, 0), h);
 }
 
-function buildHead(a: Avatar, p: Persona): THREE.BufferGeometry {
+function buildHead(a: Avatar, p: Persona, outfit: Outfit): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
-  const skin = a.skin, h = a.hair;
-  parts.push(paint(at(sphere(0.3, 22, 17), 0, 0, 0, 0, 0, 0, 1, 0.94, 0.96), skin)); // head keeps more segments: it carries the silhouette
-  for (const sx of [-1, 1]) {
-    parts.push(paint(at(sphere(0.125, 7, 6), sx * 0.115, -0.1, 0.15), skin)); // soft cheeks / jaw
-    parts.push(paint(at(sphere(0.065, 6, 5), sx * 0.29, -0.02, 0, 0, 0, 0, 0.55, 1, 0.9), skin)); // ears
-    if (!FAR) parts.push(paint(at(sphere(0.03, 5, 4), sx * 0.305, -0.02, 0.01, 0, 0, 0, 0.5, 0.7, 0.7), shade(skin, 0.82)));
-    if (p.blush) parts.push(paint(at(sphere(0.045, 6, 4), sx * 0.165, -0.075, 0.245, 0, sx * 0.5, 0, 1, 0.55, 0.3), '#ff9b94'));
-    // eyebrows (bald heads get skin-toned brows so the face still reads)
-    const browC = a.hairStyle === 4 ? shade(skin, 0.62) : shade(h, 0.85);
-    parts.push(paint(at(capsule(0.013, 0.055, 2, 4), sx * 0.105, 0.095, 0.268, 0, sx * 0.35, Math.PI / 2 + sx * p.brow), browC));
+  const skin = a.skin, h = a.hair, face = p.face;
+  const skull = sphere(0.3, 25, 19);
+  const vertices = skull.getAttribute('position');
+  for (let i = 0; i < vertices.count; i++) {
+    const y = vertices.getY(i);
+    const jaw = THREE.MathUtils.smoothstep(-y, 0.035, 0.205);
+    const x = vertices.getX(i) * (1 + (face.jaw - 1) * jaw);
+    const z = vertices.getZ(i);
+    vertices.setXYZ(i, x, y * 0.94, z > 0 ? z * 0.96 + jaw * 0.009 : z * 0.96);
   }
-  parts.push(paint(at(sphere(0.032, 6, 5), 0, -0.04, 0.29, 0, 0, 0, 1, 0.85, 0.8), shade(skin, 0.94))); // nose bump
-  // mouth
-  const lip = '#8a3b33';
-  switch (p.mouth) {
-    case 0: parts.push(paint(at(torus(0.038, 0.01, Math.PI), 0, -0.1, 0.268, Math.PI, 0, 0), lip)); break; // smile
-    case 1: // open happy mouth
-      parts.push(paint(at(new THREE.CircleGeometry(0.042, sg(9), Math.PI, Math.PI), 0, -0.085, 0.279, -0.25, 0, 0), '#5b1f1f'));
-      parts.push(paint(at(new THREE.CircleGeometry(0.022, sg(8), Math.PI, Math.PI), 0, -0.108, 0.281, -0.25, 0, 0), '#ff8a8a'));
-      break;
-    case 2: parts.push(paint(at(sphere(0.017, 5, 4), 0, -0.105, 0.272, 0, 0, 0, 1.2, 1, 0.5), lip)); break; // small "o"
-    default: parts.push(paint(at(capsule(0.008, 0.04, 2, 4), 0, -0.1, 0.273, 0, 0, Math.PI / 2), lip)); // calm line
+  skull.computeVertexNormals();
+  parts.push(paint(skull, skin));
+  for (const side of [-1, 1]) {
+    const ear = side * 0.284;
+    parts.push(paint(at(sphere(0.064, 8, 6), ear, -0.042, -0.009, 0, 0, side * -0.17, 0.55, 1, 0.8), skin));
+    if (!FAR) {
+      parts.push(paint(at(sphere(0.03, 6, 4), ear + side * 0.014, -0.04, 0.027, 0, 0, 0, 0.55, 0.8, 0.27), shade(skin, 0.8)));
+      if (outfit.detail === 'earrings') parts.push(paint(at(torus(0.025, 0.006), ear + side * 0.021, -0.1, 0.020, 0, side * 0.35), '#bf9650'));
+    }
+    const brow = a.hairStyle === 4 && outfit.detail !== 'moustache' ? shade(skin, 0.52) : shade(h, 0.8);
+    parts.push(paint(at(capsule(0.010, 0.056, 2, 5), side * 0.109, 0.083, 0.269, 0, side * 0.35, Math.PI / 2 - side * face.brow), brow));
+    if (!FAR && outfit.detail === 'freckles') {
+      for (let i = 0; i < 4; i++) {
+        const x = 0.119 + i * 0.021, y = -0.045 - (i % 2) * 0.016;
+        const z = Math.sqrt(0.3 ** 2 - x * x - y * y) * 0.96 + 0.004;
+        parts.push(paint(at(sphere(0.007, 5, 4), x * side, y, z, 0, side * 0.35, 0, 1, 0.8, 0.35), shade(skin, 0.62)));
+      }
+    }
+  }
+  parts.push(paint(at(sphere(0.034, 9, 7), 0, -0.042, 0.285, -0.25, 0, 0, 0.85, 0.87, face.nose), shade(skin, 0.94)));
+
+  const lip = new THREE.Color(skin).lerp(new THREE.Color('#5d2d2a'), 0.57).getStyle();
+  if (face.mouth === 0) {
+    parts.push(paint(at(torus(0.037, 0.007, Math.PI), 0, -0.096, 0.273, Math.PI, 0, 0, 1.22, 0.58, 1), lip));
+  } else if (face.mouth === 1) {
+    parts.push(paint(at(sphere(0.034, 9, 6), 0, -0.118, 0.274, -0.15, 0, 0.14, 1.22, 0.49, 0.22), lip));
+  } else {
+    parts.push(paint(at(capsule(0.006, 0.045, 2, 5), 0, -0.113, 0.277, 0, 0, Math.PI / 2 - 0.12), lip));
+  }
+
+  if (outfit.detail === 'moustache') {
+    for (const side of [-1, 1]) {
+      const curve = capsule(0.016, 0.050, 2, 6);
+      parts.push(paint(at(curve, side * 0.034, -0.077, 0.295, 0, side * 0.28, Math.PI / 2 + side * 0.24), h));
+      parts.push(paint(at(capsule(0.024, 0.048, 2, 5), side * 0.27, -0.003, -0.047, 0.4, 0, side * 0.36), h));
+    }
+  } else if (outfit.detail === 'stubble' && !FAR) {
+    for (let i = 0; i < 12; i++) {
+      const x = (i % 6 - 2.5) * 0.025, y = -0.155 - Math.floor(i / 6) * 0.029;
+      const z = Math.sqrt(0.3 ** 2 - x * x - (y / 0.94) ** 2) * 0.96 + 0.014;
+      parts.push(paint(at(sphere(0.005, 4, 3), x, y, z, 0, 0, 0, 1, 1, 0.5), shade(skin, 0.59)));
+    }
+  }
+
+  if (outfit.glasses) {
+    const tint = outfit.glasses === 'round' ? '#9a794e' : '#3d3435';
+    for (const side of [-1, 1]) {
+      const x = side * 0.109;
+      if (outfit.glasses === 'round') {
+        parts.push(paint(at(torus(0.068, 0.007), x, 0.007, 0.309, 0, side * 0.13, 0, 1, 0.87, 1), tint));
+      } else {
+        for (const y of [-0.041, 0.055]) parts.push(paint(at(capsule(0.007, 0.116, 2, 5), x, y, 0.310, 0, side * 0.1, Math.PI / 2), tint));
+        for (const offset of [-0.062, 0.062]) parts.push(paint(at(capsule(0.007, 0.085, 2, 5), x + offset, 0.007, 0.309 - side * offset * 0.1), tint));
+      }
+      parts.push(paint(at(box(0.010, 0.012, 0.125), side * 0.181, 0.028, 0.247, 0, side * -0.54, 0), tint));
+    }
+    parts.push(paint(at(box(0.079, 0.011, 0.012), 0, 0.021, 0.317), tint));
   }
   // hair
   switch (a.hairStyle) {
@@ -122,15 +187,18 @@ function buildHead(a: Avatar, p: Persona): THREE.BufferGeometry {
   // headwear
   const capC = a.shirt === '#ffffff' ? '#e63946' : a.shirt;
   switch (a.headwear) {
-    case 1: // chef hat
-      parts.push(paint(at(cyl(0.25, 0.26, 0.17, 13), 0, 0.29, 0), '#ffffff'));
-      for (const [x, z] of [[0, 0], [0.11, 0.06], [-0.11, 0.06], [0, -0.11]]) parts.push(paint(at(sphere(0.17, 7, 6), x, 0.48, z), '#fbfbf7'));
+    case 1: // folded kitchen cap with a flat, sewn crown
+      parts.push(paint(at(lathe([[0.239, 0.225], [0.265, 0.249], [0.273, 0.295], [0.269, 0.35], [0.239, 0.398], [0.185, 0.417], [0, 0.422]], 20), 0, 0, 0.006, -0.07), '#eae2d1'));
+      parts.push(paint(at(lathe([[0.252, 0.243], [0.267, 0.257], [0.271, 0.275]], 18), 0, 0, 0.007, -0.07), '#d1c4ae'));
+      if (!FAR) for (const x of [-0.112, -0.056, 0, 0.056, 0.112]) {
+        parts.push(paint(at(capsule(0.004, 0.061, 2, 5), x, 0.333, Math.sqrt(0.26 ** 2 - x * x) - 0.006, -0.19, 0, -x * 0.6), '#cbbda8'));
+      }
       break;
     case 2: // hachimaki headband with a red rising-sun dot and knotted tails
-      parts.push(paint(at(cyl(0.308, 0.308, 0.07, 16), 0, 0.12, 0), '#ffffff'));
-      parts.push(paint(at(new THREE.CircleGeometry(0.035, sg(10)), 0, 0.12, 0.309), '#d62828'));
-      parts.push(paint(at(sphere(0.04), 0, 0.12, -0.31), '#ffffff'));
-      for (const sx of [-1, 1]) parts.push(paint(at(box(0.035, 0.15, 0.015), sx * 0.04, 0.05, -0.32, 0.2, 0, sx * 0.45), '#ffffff'));
+      parts.push(paint(lathe([[0.314, 0.095], [0.322, 0.103], [0.321, 0.143], [0.313, 0.15]], 22), '#ebe0c9'));
+      parts.push(paint(at(new THREE.CircleGeometry(0.021, sg(10)), 0, 0.121, 0.324), '#a4443b'));
+      parts.push(paint(at(sphere(0.033), -0.037, 0.122, -0.323), '#ebe0c9'));
+      for (const side of [-1, 1]) parts.push(paint(at(capsule(0.018, 0.122, 2, 6), -0.042 + side * 0.027, 0.043, -0.333, 0.23, 0, side * 0.49, 1, 1, 0.33), '#dfd5c0'));
       break;
     case 3: // baseball cap
       parts.push(paint(at(new THREE.SphereGeometry(0.325, sg(11), sg(6, 2), 0, Math.PI * 2, 0, Math.PI * 0.5), 0, 0.06, 0), capC));
@@ -143,25 +211,36 @@ function buildHead(a: Avatar, p: Persona): THREE.BufferGeometry {
 
 function buildEyes(p: Persona): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
-  const k = p.eyeSize;
-  for (const sx of [-1, 1]) {
-    const x = sx * 0.105, ry = sx * 0.33;
-    if (p.eye === 2) { // content closed arcs ^^
-      parts.push(paint(at(torus(0.032, 0.009, Math.PI), x, 0.005, 0.27, 0, ry, 0), '#2a1f24'));
-      continue;
-    }
-    const tall = p.eye === 1;
-    parts.push(paint(at(sphere(0.045 * k, 13, 9), x, 0.005, 0.262, 0, ry, 0, tall ? 0.85 : 1, tall ? 1.55 : 1.25, 0.55), '#1f1a24'));
-    parts.push(paint(at(sphere(0.017 * k, 5, 4), x + 0.016, 0.03, 0.285), '#ffffff'));
-    if (!FAR) parts.push(paint(at(sphere(0.008 * k, 4, 2), x - 0.012, -0.018, 0.287), '#ffffff'));
+  for (const side of [-1, 1]) {
+    const x = side * 0.110, yaw = side * 0.26;
+    const height = p.face.eyes;
+    parts.push(paint(at(sphere(0.047, 11, 8), x, 0.010, 0.263, 0, yaw, 0, 1.07, height, 0.44), '#f8eee3'));
+    parts.push(paint(at(sphere(0.032, 9, 7), x + 0.002, 0.011, 0.283, 0, yaw, 0, 0.91, height, 0.48), p.iris));
+    parts.push(paint(at(sphere(0.019, 8, 6), x + 0.003, 0.012, 0.296, 0, yaw, 0, 0.85, height, 0.54), '#221d20'));
+    parts.push(paint(at(sphere(0.008, 5, 4), x - 0.006, 0.023, 0.305), '#fff9ef'));
+    if (!FAR) parts.push(paint(at(torus(0.042, 0.004, Math.PI), x, 0.011, 0.280, 0, yaw, 0, 1.13, height, 1), '#4c322e'));
   }
   return merge(parts);
 }
 
 // ---------------------------------------------------------------- body
+function clothPanel(points: [number, number][], z: number, color: string): THREE.BufferGeometry {
+  const shape = new THREE.Shape();
+  points.forEach(([x, y], i) => i ? shape.lineTo(x, y) : shape.moveTo(x, y));
+  shape.closePath();
+  return paint(at(new THREE.ExtrudeGeometry(shape, {
+    depth: 0.007, bevelEnabled: !FAR, bevelThickness: 0.003, bevelSize: 0.003, bevelSegments: 1,
+  }), 0, 0, z), color);
+}
+
+function workCut(o: Outfit): NonNullable<Outfit['cut']> | undefined { return o.cut ?? (o.apron === true ? 'coat' : undefined); }
+
 function buildTorso(a: Avatar, o: Outfit): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
   const z = 0.78; // depth squash: bodies are a little flatter than round
+  const cut = workCut(o);
+  const jacket = o.vest ?? a.shirt;
+  const trimColor = o.trim ?? shade(jacket, 1.27);
   // pants / hips (tapered lathe), belt, shirt (waist → chest → shoulders)
   parts.push(paint(at(lathe([[0.001, -0.04], [0.17, -0.03], [0.195, 0.04], [0.185, 0.16]]), 0, 0, 0, 0, 0, 0, 1, 1, z), a.pants));
   parts.push(paint(at(torus(0.183, 0.022), 0, 0.15, 0, Math.PI / 2, 0, 0, 1, z, 1), '#2b2220'));
@@ -171,26 +250,57 @@ function buildTorso(a: Avatar, o: Outfit): THREE.BufferGeometry {
   // collar points + buttons + chest pocket
   const trim = shade(a.shirt, a.shirt === '#ffffff' ? 0.92 : 0.8);
   for (const sx of [-1, 1]) parts.push(paint(at(box(0.08, 0.05, 0.02), sx * 0.045, 0.52, 0.115, -0.5, 0, sx * 0.6), trim));
-  if (!o.apron && !o.vest) {
+  if (!o.apron && !o.vest && !cut) {
     if (!FAR) for (const y of [0.25, 0.33, 0.41]) parts.push(paint(at(sphere(0.011, 4, 2), 0, y, 0.152 - (0.41 - y) * 0.02), shade(a.shirt, 0.7)));
     if (!FAR) parts.push(paint(at(box(0.07, 0.07, 0.012), -0.09, 0.38, 0.152, -0.12, 0, 0), trim));
   }
-  if (o.vest) {
+  if (cut === 'coat') {
+    parts.push(clothPanel([[-0.11, 0.517], [-0.04, 0.532], [0.111, 0.369], [0.071, 0.326]], 0.141, trimColor));
+    parts.push(clothPanel([[0.091, 0.525], [0.138, 0.500], [-0.045, 0.354], [-0.068, 0.385]], 0.158, shade(a.shirt, 0.88)));
+    for (const y of [0.401, 0.453]) parts.push(paint(at(sphere(0.011, 5, 4), 0.105, y, 0.152), shade(a.shirt, 0.72)));
+  } else if (cut === 'blazer' || cut === 'workwear') {
+    parts.push(paint(at(lathe([[0.193, 0.16], [0.184, 0.24], [0.202, 0.36], [0.21, 0.445], [0.169, 0.502]]), 0, 0, 0, 0, 0, 0, 1.03, 1, 0.82), jacket));
+    parts.push(clothPanel([[-0.095, 0.501], [0.095, 0.501], [0.047, 0.261], [-0.047, 0.261]], 0.153, a.shirt));
+    for (const side of [-1, 1]) {
+      if (cut === 'blazer') {
+        parts.push(clothPanel([[side * 0.11, 0.505], [side * 0.145, 0.447], [side * 0.107, 0.429], [side * 0.122, 0.396], [side * 0.032, 0.31]], 0.171, shade(jacket, 1.19)));
+      } else {
+        parts.push(clothPanel([[side * 0.045, 0.505], [side * 0.14, 0.485], [side * 0.103, 0.421], [side * 0.066, 0.451]], 0.169, trimColor));
+        parts.push(clothPanel([[side * 0.117, 0.373], [side * 0.174, 0.373], [side * 0.176, 0.299], [side * 0.12, 0.290]], 0.153, shade(jacket, 1.35)));
+      }
+    }
+    if (!FAR) {
+      parts.push(paint(at(box(0.067, 0.013, 0.017), -0.116, 0.284, 0.159), trimColor));
+      for (const y of [0.217, 0.274]) parts.push(paint(at(sphere(0.008, 5, 4), 0.024, y, 0.173), '#ac8a60'));
+    }
+  } else if (cut === 'knit') {
+    for (const [y, width] of [[0.198, 0.177], [0.252, 0.178], [0.32, 0.19], [0.394, 0.201]]) {
+      parts.push(paint(at(lathe([[width, y], [width + 0.005, y + 0.024]]), 0, 0, 0, 0, 0, 0, 1, 1, 0.80), trimColor));
+    }
+    parts.push(paint(at(torus(0.071, 0.011), 0, 0.546, 0, Math.PI / 2, 0, 0, 1, 0.83), trimColor));
+  } else if (o.vest) {
     parts.push(paint(at(lathe([[0.19, 0.17], [0.178, 0.25], [0.198, 0.36], [0.21, 0.45], [0.17, 0.5]]), 0, 0, 0, 0, 0, 0, 1.02, 1, z * 1.03), o.vest));
     parts.push(paint(at(box(0.07, 0.3, 0.02), 0, 0.33, 0.152), a.shirt)); // shirt placket between lapels
     if (!FAR) for (const y of [0.24, 0.31]) parts.push(paint(at(sphere(0.012, 4, 2), 0.045, y, 0.16), '#d4af37'));
   }
   if (o.tie) {
-    parts.push(paint(at(box(0.05, 0.05, 0.02), 0, 0.49, 0.135), o.tie));
-    parts.push(paint(at(new THREE.ConeGeometry(0.04, 0.26, sg(4)), 0, 0.33, 0.158, Math.PI, Math.PI / 4, 0, 1, 1, 0.35), o.tie));
+    parts.push(clothPanel([[-0.025, 0.496], [0.025, 0.496], [0.014, 0.451], [-0.015, 0.451]], 0.18, o.tie));
+    parts.push(clothPanel([[-0.013, 0.45], [0.013, 0.45], [0.027, 0.298], [0, 0.271], [-0.025, 0.298]], 0.182, shade(o.tie, 0.94)));
   }
   if (o.apron) {
-    parts.push(paint(at(new THREE.BoxGeometry(0.3, 0.5, 0.025), 0, 0.12, 0.158), '#f6f3ec'));
-    parts.push(paint(at(box(0.3, 0.012, 0.03), 0, 0.37, 0.16), '#d9d2c3'));
-    if (!FAR) parts.push(paint(at(box(0.08, 0.06, 0.012), 0.07, 0.1, 0.173), '#e6dfd0')); // apron pocket
-    for (const sx of [-1, 1]) parts.push(paint(at(box(0.025, 0.2, 0.02), sx * 0.12, 0.45, 0.1, -0.35, 0, -sx * 0.25), '#f6f3ec'));
-    parts.push(paint(at(torus(0.186, 0.012), 0, 0.2, 0, Math.PI / 2, 0, 0, 1, z, 1), '#f6f3ec'));
-    for (const sx of [-1, 1]) parts.push(paint(at(sphere(0.035, 5, 4), sx * 0.035, 0.2, -0.15, 0, 0, 0, 1, 0.6, 0.6), '#f6f3ec')); // bow
+    const apron = typeof o.apron === 'string' ? o.apron : UNIFORMS[a.uniformStyle ?? 0] ?? UNIFORMS[0];
+    const seam = o.trim ?? shade(apron, 1.48);
+    parts.push(clothPanel([[-0.085, 0.374], [0.085, 0.374], [0.106, 0.254], [0.155, 0.209], [0.152, -0.106], [0.113, -0.125], [-0.131, -0.116], [-0.157, -0.094], [-0.154, 0.209], [-0.104, 0.26]], 0.176, apron));
+    parts.push(clothPanel([[-0.151, 0.221], [0.151, 0.221], [0.15, 0.202], [-0.15, 0.202]], 0.191, seam));
+    for (const side of [-1, 1]) {
+      parts.push(paint(at(capsule(0.013, 0.138, 2, 5), side * 0.106, 0.441, 0.136, -0.29, 0, side * -0.55, 1.02, 1, 0.51), apron));
+      parts.push(paint(at(capsule(0.008, 0.19, 2, 5), side * 0.159, 0.214, 0.05, Math.PI / 2, 0, 0), seam));
+    }
+    if (!FAR) {
+      parts.push(clothPanel([[0.015, 0.119], [0.117, 0.119], [0.116, 0.056], [0.097, 0.033], [0.033, 0.033], [0.016, 0.055]], 0.190, shade(apron, 0.79)));
+      parts.push(clothPanel([[0.017, 0.117], [0.116, 0.117], [0.115, 0.107], [0.018, 0.107]], 0.201, seam));
+      parts.push(clothPanel([[-0.062, 0.335], [-0.034, 0.335], [-0.034, 0.304], [-0.062, 0.304]], 0.191, '#b59a68'));
+    }
   }
   if (o.bag) {
     parts.push(paint(at(capsule(0.13, 0.12, 2, 8), 0, 0.3, -0.2, 0, 0, 0, 1.1, 1, 0.55), o.bag));
@@ -200,22 +310,34 @@ function buildTorso(a: Avatar, o: Outfit): THREE.BufferGeometry {
   return merge(parts);
 }
 
-function buildArm(a: Avatar, side: 1 | -1): THREE.BufferGeometry {
+function buildArm(a: Avatar, o: Outfit, side: 1 | -1): THREE.BufferGeometry {
   // pivot at the shoulder; hangs down -y. Tapered sleeve, cuff, mitten hand with a thumb nub.
-  return merge([
-    paint(sphere(0.078, 6, 5), a.shirt),
-    paint(at(lathe([[0.075, 0], [0.068, -0.15], [0.058, -0.3], [0.001, -0.31]], 8), 0, 0, 0), a.shirt),
-    paint(at(torus(0.057, 0.014), 0, -0.3, 0, Math.PI / 2, 0, 0), shade(a.shirt, 0.82)),
+  const cut = workCut(o);
+  const sleeve = cut === 'blazer' || cut === 'workwear' ? o.vest ?? a.shirt : a.shirt;
+  const cuff = cut === 'blazer' ? a.shirt : o.trim ?? shade(sleeve, 0.80);
+  const parts = [
+    paint(sphere(0.078, 8, 6), sleeve),
+    paint(at(lathe([[0.001, -0.31], [0.059, -0.3], [0.069, -0.15], [0.075, 0]], 10), 0, 0, 0), sleeve),
+    paint(at(torus(0.056, 0.012), 0, -0.305, 0, Math.PI / 2, 0, 0), cuff),
     paint(at(sphere(0.066, 7, 6), 0, -0.37, 0.005, 0, 0, 0, 0.9, 1.05, 0.8), a.skin),
     paint(at(sphere(0.027, 5, 4), -side * 0.045, -0.35, 0.035), a.skin),
-  ]);
+  ];
+  if (cut === 'knit') {
+    for (const [y, width] of [[-0.24, 0.064], [-0.175, 0.069], [-0.11, 0.072]]) {
+      parts.push(paint(lathe([[width, y], [width + 0.003, y + 0.021]], 10), cuff));
+    }
+  }
+  return merge(parts);
 }
 
-function buildLeg(a: Avatar, p: Persona): THREE.BufferGeometry {
+function buildLeg(a: Avatar, p: Persona, o: Outfit): THREE.BufferGeometry {
+  const cut = workCut(o);
+  const shoe = cut === 'blazer' ? '#4c382f' : cut === 'coat' ? '#413a34' : p.shoe;
+  const sole = cut === 'blazer' || cut === 'coat' ? '#2c2727' : p.sole;
   return merge([
-    paint(at(lathe([[0.088, 0.02], [0.084, -0.12], [0.07, -0.33], [0.066, -0.4], [0.001, -0.41]], 8), 0, 0, 0), a.pants),
-    paint(at(sphere(0.075, 7, 6), 0, -0.455, 0.045, 0, 0, 0, 0.95, 0.62, 1.55), p.shoe),
-    paint(at(box(0.13, 0.022, 0.23), 0, -0.489, 0.045), p.sole),
+    paint(lathe([[0.001, -0.41], [0.066, -0.4], [0.07, -0.33], [0.084, -0.12], [0.088, 0.02]], 10), a.pants),
+    paint(at(sphere(0.075, 10, 7), 0, -0.458, 0.03, 0, 0, 0, 0.91, 0.62, 1.58), shoe),
+    paint(at(lathe([[0, -0.502], [0.07, -0.502], [0.074, -0.489], [0.069, -0.477]], 10), 0, 0, 0.035, 0, 0, 0, 0.97, 1, 1.56), sole),
   ]);
 }
 
@@ -237,8 +359,9 @@ function buildCharacter(a: Avatar, o: Outfit, far: boolean): THREE.BufferGeometr
   Q = far ? 0.42 : 0.72; FAR = far;
   const p = persona(a);
   const parts: [THREE.BufferGeometry, B][] = [
-    [buildHead(a, p), B.Head], [buildEyes(p), B.Eyes], [buildTorso(a, o), B.Chest],
-    [buildArm(a, -1), B.ArmL], [buildArm(a, 1), B.ArmR], [buildLeg(a, p), B.LegL], [buildLeg(a, p), B.LegR],
+    [buildHead(a, p, o).scale(p.face.width, p.face.height, 1), B.Head],
+    [buildEyes(p).scale(p.face.width, p.face.height, 1), B.Eyes], [buildTorso(a, o), B.Chest],
+    [buildArm(a, o, -1), B.ArmL], [buildArm(a, o, 1), B.ArmR], [buildLeg(a, p, o), B.LegL], [buildLeg(a, p, o), B.LegR],
   ];
   Q = 1; FAR = false;
   const geo = merge(parts.map(([g, b]) => {

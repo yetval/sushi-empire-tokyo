@@ -338,7 +338,7 @@ describe('purchases charge exact costs and refuse when short', () => {
   });
 
   it('buyProperty', () => {
-    const price = PROPERTIES.asakusa_shop.price;
+    const price = PROPERTIES.asakusa_shop.price + A.fitoutCost('asakusa_shop', 'bar'); // lot + fit-out
     s.cash = price - 1;
     expect(A.buyProperty(s, 'asakusa_shop')).toMatch(/Need/);
     expect(s.restaurants.asakusa_shop).toBeUndefined();

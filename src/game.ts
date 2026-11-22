@@ -11,6 +11,7 @@ import { checkAchievements, rewardText } from './core/achievements';
 import { QuestEvent, ensureQuests, questOnEvent } from './core/quests';
 import { makeReview, pushReview } from './core/reviews';
 import { tickContracts } from './core/contracts';
+import { tickEmpire } from './core/empire';
 import * as sim from './core/sim';
 import {
   Avatar, GameState, SAVE_KEY, Ticket, createNewState, exportSave, importSave, loadFromStorage, saveToStorage,
@@ -225,6 +226,8 @@ export class Game implements UIHost {
     return !!sp && Math.hypot(sp.x - this.player.pos.x, sp.z - this.player.pos.z) < 3;
   }
   setPaused(p: boolean): void { this.paused = p; }
+  speed: 1 | 2 | 4 = 1;
+  setSpeed(n: 1 | 2 | 4): void { this.speed = n; }
   ordersAtCurrentSite(): OrderView[] { const id = this.currentSite(); return id ? this.npcs.ordersView(this.s, id) : []; }
 
   // ------------------------------------------------------------ scenes
@@ -431,8 +434,10 @@ export class Game implements UIHost {
       if (!this.ui.closeTop() && this.started) this.ui.openPause();
     }
     if (this.started && !this.paused) {
-      sim.tick(s, dt, { activeDistrict: this.district.id });
-      tickContracts(s, dt);
+      const sdt = dt * this.speed; // tycoon time speed
+      sim.tick(s, sdt, { activeDistrict: this.district.id });
+      tickContracts(s, sdt);
+      tickEmpire(s);
       ensureQuests(s.quests, s);
       if ((this.achTimer += dt) > 1) {
         this.achTimer = 0;
@@ -449,6 +454,9 @@ export class Game implements UIHost {
       else if (this.input.enabled) {
         if (this.input.pressed('Tab')) this.ui.toggleManage();
         if (this.input.pressed('KeyM')) this.ui.openMap();
+        if (this.input.pressed('Digit1')) this.setSpeed(1);
+        if (this.input.pressed('Digit2')) this.setSpeed(2);
+        if (this.input.pressed('Digit3')) this.setSpeed(4);
       }
       if (!this.photo.isOpen()) this.cam.input(this.input.dragX, this.input.dragY, this.input.wheel);
       this.player.update(dt, this.input, this.cam.yaw);
@@ -477,7 +485,7 @@ export class Game implements UIHost {
     this.sky.setRain(rain);
     this.sky.update(dt, this.player.pos);
     this.district.update(dt, this.night, this.player.pos);
-    if (!this.paused) this.npcs.update(dt, s, this.player.pos, this.night);
+    if (!this.paused) this.npcs.update(dt * (this.started ? this.speed : 1), s, this.player.pos, this.night);
     this.fx.focus.copy(this.player.pos);
     this.fx.update(dt);
     if ((this.steamT += dt) > 0.3) { // steam over busy prep boards in this district

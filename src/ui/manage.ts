@@ -1,4 +1,5 @@
 // Business management window (Tab): restaurants, staff, inventory, marketing, research, expansion, empire, finances, awards.
+import { AREAS } from '../core/data';
 import { audio } from '../audio/audio';
 import * as A from '../core/actions';
 import {
@@ -180,7 +181,7 @@ export class Manage {
 
   // ------------------------------------------------------------ restaurants
   private priceLabel(): string {
-    const r = this.s.restaurants[this.sel!], d = DISTRICTS[PROPERTIES[r.id].district];
+    const r = this.s.restaurants[this.sel!], d = AREAS[PROPERTIES[r.id].district];
     const dem = sim.priceDemand(r.priceMult, d.elasticity);
     return `Price ×${r.priceMult.toFixed(2)} → demand <b class="${dem >= 1 ? 'good' : 'bad'}">${Math.round(dem * 100)}%</b> of normal · ${d.name} guests are ${d.elasticity < 1 ? 'not very' : d.elasticity > 1.4 ? 'very' : 'fairly'} price-sensitive`;
   }
@@ -245,7 +246,7 @@ export class Manage {
         <div class="tiny muted">${st.map((e) => esc(e.name) + ' ★' + e.skill).join(', ') || 'Nobody yet'}</div></div>`;
     }).join('');
     return `${chips}
-      <div class="section spread"><div><h2>${esc(r.name)}</h2><div class="muted">${DISTRICTS[p.district].name} · ${p.kind} · rent ${yen(p.rent)}/day · ${p.seatsMax} seats max</div></div>
+      <div class="section spread"><div><h2>${esc(r.name)}</h2><div class="muted">${AREAS[p.district].name} · ${p.kind} · rent ${yen(p.rent)}/day · ${p.seatsMax} seats max</div></div>
         <span class="chip ${auto ? 'green' : 'red'}">${auto ? '⚙️ Fully automated' : s.lifetime.pieces < 50 ? '🧑‍🍳 You run this stand' : '🧑‍🍳 Needs you (hire chef + server)'}</span></div>
       ${stats}
       <div class="section"><h3>💴 Pricing</h3><div class="card"><input type="range" min="0.6" max="2.5" step="0.05" value="${r.priceMult}" data-in="price" aria-label="Price multiplier" aria-valuetext="price ×${r.priceMult.toFixed(2)}">

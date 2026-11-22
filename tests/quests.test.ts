@@ -101,7 +101,7 @@ describe('rolling', () => {
   });
 
   it('fresh-state rolls never include locked content', () => {
-    const allowed: QuestKind[] = ['serve', 'office', 'recipe', 'earn', 'perfect', 'lunch', 'upgrade'];
+    const allowed: QuestKind[] = ['serve', 'office', 'recipe', 'earn', 'perfect', 'lunch', 'upgrade', 'hire']; // hiring is open from day one
     const s = createNewState();
     for (let seed = 1; seed < 300; seed++) {
       for (const x of rollDailyQuests(s, seeded(seed))) {

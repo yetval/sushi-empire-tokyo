@@ -2,7 +2,7 @@
 // The game feeds questOnEvent() from the places where things happen (sales, cooking, purchases, day end).
 import { toast } from './bus';
 import {
-  CLOSE_MIN, CustomerType, DAY_SECONDS, DISTRICTS, DistrictId, MAX_SKILL, OPEN_MIN, PROPERTIES, RECIPES, ROLES,
+  AREAS, CLOSE_MIN, CustomerType, isWalkable, DAY_SECONDS, DISTRICTS, DistrictId, MAX_SKILL, OPEN_MIN, PROPERTIES, RECIPES, ROLES,
   Role, UPGRADES,
 } from './data';
 import { short, yen } from './format';
@@ -71,11 +71,11 @@ function flow(s: GameState, from = OPEN_MIN, to = 1440 + CLOSE_MIN): Flow {
     else { cap = manual; manual = 0; }
     let g = 0;
     for (let m = from; m < to; m += SLOT) g += Math.min(sim.demandPerMin(s, id, m % 1440), cap) * REAL_MIN_PER_SLOT;
-    const mix = DISTRICTS[d].mix, total = Object.values(mix).reduce((a, w) => a + (w ?? 0), 0);
+    const mix = AREAS[d].mix, total = Object.values(mix).reduce((a, w) => a + (w ?? 0), 0);
     const pieces = g * PIECES_PER_GUEST;
     f.guests += g; f.office += (g * (mix.office ?? 0)) / total;
     f.pieces += pieces; f.sales += pieces * price;
-    f.byDistrict[d] = (f.byDistrict[d] ?? 0) + pieces;
+    (f.byDistrict as Record<string, number>)[d] = ((f.byDistrict as Record<string, number>)[d] ?? 0) + pieces;
     for (const m of menu) f.byRecipe[m] = (f.byRecipe[m] ?? 0) + pieces / menu.length;
   }
   return f;
@@ -107,7 +107,8 @@ interface KindDef { w: number; ok: (s: GameState) => boolean; make: (s: GameStat
 
 const pickOf = <T>(a: readonly T[], rng: () => number): T => a[Math.floor(rng() * a.length)];
 const menuRecipes = (s: GameState) => [...new Set(Object.values(s.restaurants).flatMap((r) => r.menu))].filter((m) => s.recipes.includes(m));
-const ownedDistricts = (s: GameState) => [...new Set(Object.keys(s.restaurants).map((id) => PROPERTIES[id].district))];
+// district quests only use walkable districts (you can't 'visit' a management-only area)
+const ownedDistricts = (s: GameState) => [...new Set(Object.keys(s.restaurants).map((id) => PROPERTIES[id].district))].filter(isWalkable);
 
 const FLAVOR: Record<DistrictId, { sell: string; visit: string }> = {
   asakusa: { sell: 'Old Town Favorite', visit: 'Temple Gate Stroll' },
@@ -165,9 +166,9 @@ const KINDS: Record<QuestKind, KindDef> = {
     make: () => ({ title: 'Red Carpet Service', desc: 'Serve 1 VIP guest or food critic.', target: 1 }),
   },
   travel: {
-    w: 0.17, ok: (s) => s.districts.some((d) => d !== s.player.district),
+    w: 0.17, ok: (s) => s.districts.some((d) => isWalkable(d) && d !== s.player.district),
     make: (s, { rng }) => {
-      const district = pickOf(s.districts.filter((d) => d !== s.player.district), rng);
+      const district = pickOf(s.districts.filter((d): d is DistrictId => isWalkable(d) && d !== s.player.district), rng);
       return { title: FLAVOR[district].visit, desc: `Ride the metro to ${DISTRICTS[district].name} 1 time.`, target: 1, meta: { district } };
     },
   },

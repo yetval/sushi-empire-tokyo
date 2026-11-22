@@ -5,6 +5,7 @@ import { createContractState, sanitizeContracts, type ContractState } from './co
 import {
   CAMPAIGNS, CITIES, CUSTOMERS, CustomerType, DISTRICTS, DistrictId, EVENTS, INGREDIENT_IDS, IngredientId,
   PROPERTIES, RECIPES, RIVALS, ROLES, Role, START_MINUTE, START_RECIPES, wageFor,
+  AREAS, ConceptId,
 } from './data';
 
 export const SAVE_VERSION = 1;
@@ -13,6 +14,8 @@ export const SAVE_KEY = 'sushi-empire-tokyo-save';
 export interface Avatar {
   skin: string; hair: string; hairStyle: number; // 0 short,1 spiky,2 long,3 bun,4 bald
   shirt: string; pants: string; headwear: number; // 0 none,1 chef hat,2 headband,3 cap
+  faceStyle?: number;
+  uniformStyle?: number;
 }
 
 export interface Ticket {
@@ -41,7 +44,16 @@ export interface RestaurantState {
   served: number; revenue: number; // lifetime for this location
   satisfaction: number; // rolling avg 0..1
   openedDay: number;
+  concept: ConceptId; // restaurant format
+  policy: { autoHire: boolean; autoPrice: boolean }; // house rules (need a manager here or Operations Center research)
+  day: RestDay; // today's books for this location
+  hist: RestDay[]; // last 14 closed days, oldest first
+  log: string[]; // today's automation receipts (what the house rules did)
 }
+
+/** One day of books for a single restaurant. cost = ingredients + wages + rent. */
+export interface RestDay { day: number; rev: number; cost: number; pieces: number; guests: number; lost: number }
+export const emptyDay = (day: number): RestDay => ({ day, rev: 0, cost: 0, pieces: 0, guests: 0, lost: 0 });
 
 export interface Employee {
   id: number; name: string; role: Role; skill: number; xp: number; wage: number;
@@ -78,7 +90,7 @@ export interface GameState {
   rp: number; research: string[];
   recipes: string[];
   milestoneIndex: number; // number of milestones reached
-  districts: DistrictId[];
+  districts: string[]; // unlocked areas (walkable districts + management-only areas)
   flags: Record<string, boolean>;
   tutorial: number; // step index; 99 = done
   rivals: Record<string, Partial<Record<DistrictId, number>>>; // rival market share 0..0.6
@@ -92,13 +104,15 @@ export interface GameState {
 
 export const DEFAULT_AVATAR: Avatar = { skin: '#f1c27d', hair: '#2b1d14', hairStyle: 0, shirt: '#ffffff', pants: '#2d3142', headwear: 2 };
 
-export function newRestaurant(id: string, day: number, brand = 0): RestaurantState {
+export function newRestaurant(id: string, day: number, brand = 0, concept?: ConceptId): RestaurantState {
   const p = PROPERTIES[id];
   return {
     id, name: p.name, upgrades: {}, priceMult: 1, menu: [...START_RECIPES],
     reputation: Math.min(3.5, 2 + brand / 40), cleanliness: 1,
     signColor: '#c0392b', theme: 0, uniform: '#ffffff',
     orders: [], ready: [], takeoutFrac: 0, served: 0, revenue: 0, satisfaction: 0.7, openedDay: day,
+    concept: concept ?? (p.kind === 'stand' ? 'stand' : 'bar'), policy: { autoHire: false, autoPrice: false },
+    day: emptyDay(day), hist: [], log: [],
   };
 }
 
@@ -140,7 +154,7 @@ export function migrate(raw: unknown): GameState {
   for (const [id, shares] of Object.entries(rivals)) raw.rivals[id] ??= shares;
   const s = raw as unknown as GameState;
   // version-specific migrations go here: if (s.version < 2) { ... }
-  if (!knownId(s.player.district, DISTRICTS) || s.districts.some((d) => !knownId(d, DISTRICTS))) {
+  if (!knownId(s.player.district, DISTRICTS) || s.districts.some((d) => !knownId(d, AREAS))) {
     throw new Error('Invalid district');
   }
   if (!Number.isSafeInteger(s.milestoneIndex) || s.milestoneIndex < 0) throw new Error('Invalid milestone');

@@ -10,11 +10,11 @@ import { emit, toast } from './bus';
 import { seasonDemand, seasonMix, seasonalRecipes } from './seasons';
 import { reservedShare } from './contracts';
 import {
-  CAMPAIGNS, CITIES, CLOSE_MIN, CUSTOMERS, CustomerType, DAY_SECONDS, DISTRICTS, DistrictId, EVENTS, FACILITIES,
+  AREAS, CAMPAIGNS, CITIES, CLOSE_MIN, CONCEPTS, CUSTOMERS, CustomerType, DAY_SECONDS, DISTRICTS, DistrictId, EVENTS, FACILITIES,
   FRANCHISE_PPS, FRANCHISE_ROYALTY, INGREDIENTS, INGREDIENT_IDS, IngredientId, MAX_SKILL, OPEN_MIN, PROPERTIES,
-  RECIPES, RIVALS, ROLES, Role, UPGRADES, milestone, wageFor,
+  RECIPES, RIVALS, recipeCost, ROLES, Role, UPGRADES, milestone, wageFor,
 } from './data';
-import { Avatar, Employee, GameState, RestaurantState, Ticket } from './state';
+import { Avatar, Employee, GameState, RestaurantState, Ticket, emptyDay } from './state';
 
 /** Minigame score counted as a 'perfect' cook everywhere (sfx, quests, awards). */
 export const PERFECT_SCORE = 0.9;
@@ -81,6 +81,9 @@ export function hourFactor(minute: number): number {
 }
 
 // ---------------------------------------------------------------- staff helpers
+/** The restaurant's format (concept). */
+export const conceptOf = (s: GameState, restId: string) => CONCEPTS[s.restaurants[restId]?.concept ?? 'bar'] ?? CONCEPTS.bar;
+
 export const staffAt = (s: GameState, restId: string, role?: Role) =>
   s.staff.filter((e) => e.restaurant === restId && (!role || e.role === role));
 
@@ -90,14 +93,14 @@ export function chefSlots(s: GameState, restId: string): number {
 }
 export function slotsFor(s: GameState, restId: string, role: Role): number {
   const p = PROPERTIES[restId];
-  if (role === 'chef') return chefSlots(s, restId);
-  if (role === 'server') return p.serverSlots;
+  if (role === 'chef') return Math.max(1, Math.round(chefSlots(s, restId) * conceptOf(s, restId).staff));
+  if (role === 'server') return conceptOf(s, restId).needsServer ? p.serverSlots : 0;
   return 1; // cleaner, manager
 }
 
 export function isAutomated(s: GameState, restId: string): boolean {
   const st = staffAt(s, restId);
-  return st.some((e) => e.role === 'chef') && st.some((e) => e.role === 'server' || e.role === 'manager');
+  return st.some((e) => e.role === 'chef') && (!conceptOf(s, restId).needsServer || st.some((e) => e.role === 'server' || e.role === 'manager'));
 }
 export const hasManager = (s: GameState, restId: string) => staffAt(s, restId, 'manager').length > 0;
 
@@ -108,14 +111,14 @@ export function kitchenRate(s: GameState, restId: string): number {
   const station = 1 + 0.2 * (r.upgrades.station ?? 0);
   let rate = 0;
   for (const c of chefs) rate += 0.36 * (1 + 0.22 * (c.skill - 1));
-  return rate * station * mods(s).cook * (eventActive(s, 'festival') ? 1.1 : 1);
+  return rate * station * mods(s).cook * conceptOf(s, restId).cook * (eventActive(s, 'festival') ? 1.1 : 1);
 }
 
 export function kitchenQuality(s: GameState, restId: string): number {
   const r = s.restaurants[restId];
   const chefs = staffAt(s, restId, 'chef');
   const avg = chefs.length ? chefs.reduce((a, c) => a + c.skill, 0) / chefs.length : 1;
-  return clamp(0.42 + 0.05 * avg + 0.06 * (r.upgrades.fridge ?? 0) + mods(s).quality, 0, 1);
+  return clamp(0.42 + 0.05 * avg + 0.06 * (r.upgrades.fridge ?? 0) + mods(s).quality + conceptOf(s, restId).quality, 0, 1);
 }
 
 /** Effective quality of a manual minigame score (equipment helps the player too). */
@@ -130,13 +133,13 @@ export function playerCookSpeed(s: GameState, restId: string): number {
 }
 
 // ---------------------------------------------------------------- demand
-export function rivalShare(s: GameState, d: DistrictId): number {
+export function rivalShare(s: GameState, d: string): number {
   let t = 0;
-  for (const rv of Object.values(s.rivals)) t += rv[d] ?? 0;
+  for (const rv of Object.values(s.rivals)) t += (rv as Record<string, number>)[d] ?? 0;
   return clamp(t, 0, 0.6);
 }
 
-export function campaignBoost(s: GameState, d: DistrictId | null): number {
+export function campaignBoost(s: GameState, d: string | null): number {
   let b = 0;
   for (const c of s.campaigns) {
     const def = CAMPAIGNS[c.id];
@@ -156,11 +159,11 @@ export function priceDemand(priceMult: number, elasticity: number): number {
 
 /** Customers per (real) minute this restaurant attracts right now. */
 export function demandPerMin(s: GameState, restId: string, minute = s.minute): number {
-  const r = s.restaurants[restId], p = PROPERTIES[restId], d = DISTRICTS[p.district];
+  const r = s.restaurants[restId], p = PROPERTIES[restId], d = AREAS[p.district], c = conceptOf(s, restId);
   const rep = 0.4 + 0.25 * r.reputation;
   const sign = (1 + 0.15 * (r.upgrades.sign ?? 0)) * (1 + 0.15 * (r.upgrades.delivery ?? 0));
   const dirty = r.cleanliness < 0.4 ? 0.7 + 0.75 * r.cleanliness : 1;
-  return d.traffic * p.size * (1 + 0.25 * (r.upgrades.expand ?? 0)) * rep * sign * dirty * priceDemand(r.priceMult, d.elasticity) * hourFactor(minute)
+  return d.traffic * c.traffic * p.size * (1 + 0.25 * (r.upgrades.expand ?? 0)) * rep * sign * dirty * priceDemand(r.priceMult, d.elasticity * c.elasticity) * hourFactor(minute)
     * campaignBoost(s, p.district) * Math.min(2.2, eventDemand(s) * seasonDemand(s)) * (1 + s.brand / 300) * (1 - rivalShare(s, p.district)) * mods(s).demand;
 }
 
@@ -172,11 +175,13 @@ export function visibleCapPerMin(s: GameState, restId: string): number {
 }
 
 export function visibleSpawnPerMin(s: GameState, restId: string): number {
+  if (!conceptOf(s, restId).walkIn) return 0; // ghost kitchens: delivery only
   return Math.min(demandPerMin(s, restId), visibleCapPerMin(s, restId));
 }
 
-export function pickCustomerType(s: GameState, d: DistrictId, minute = s.minute): CustomerType {
-  const mix = { ...DISTRICTS[d].mix };
+export function pickCustomerType(s: GameState, d: string, minute = s.minute, restId?: string): CustomerType {
+  const mix = { ...AREAS[d].mix };
+  if (restId) for (const [k, w] of Object.entries(conceptOf(s, restId).mix ?? {})) mix[k as CustomerType] = (mix[k as CustomerType] ?? 0) + (w ?? 0);
   for (const [k, w] of Object.entries(seasonMix(s))) mix[k as CustomerType] = (mix[k as CustomerType] ?? 0) + (w ?? 0);
   const h = minute / 60;
   if (s.event?.id === 'tourists') mix.tourist = (mix.tourist ?? 0) * 3;
@@ -303,7 +308,7 @@ export function finishManual(s: GameState, restId: string, ticketId: number, sco
 
 /** Bill for a ticket before tip. */
 export function bill(s: GameState, restId: string, t: Ticket): number {
-  return RECIPES[t.recipe].price * t.pieces * s.restaurants[restId].priceMult * (t.manualOnly ? 2 : 1);
+  return RECIPES[t.recipe].price * t.pieces * s.restaurants[restId].priceMult * conceptOf(s, restId).price * (t.manualOnly ? 2 : 1);
 }
 
 export function atmosphere(r: RestaurantState): number {
@@ -336,6 +341,8 @@ export function settle(s: GameState, restId: string, ticketId: number, waitSec: 
   s.lifetime.customers++; s.today.customers++;
   s.lifetime.bestOrder = Math.max(s.lifetime.bestOrder, paid + tip);
   r.served++; r.revenue += paid + tip;
+  r.day.rev += paid + tip; r.day.pieces += t.pieces; r.day.guests++;
+  r.day.cost += recipeCost(RECIPES[t.recipe], mods(s).ingredientCost) * t.pieces;
   r.satisfaction += (sat - r.satisfaction) * 0.05;
   const w = CUSTOMERS[t.customerType].repWeight;
   r.reputation = clamp(r.reputation + (sat * 5.4 - r.reputation) * 0.02 * w, 0, 5);
@@ -356,7 +363,7 @@ export function customerLeft(s: GameState, restId: string, type: CustomerType, c
     r.orders = r.orders.filter((t) => t.customerId !== customerId);
     r.ready = r.ready.filter((t) => t.customerId !== customerId);
   }
-  if (reason !== 'closed') r.reputation = clamp(r.reputation - 0.04 * CUSTOMERS[type].repWeight, 0, 5);
+  if (reason !== 'closed') { r.reputation = clamp(r.reputation - 0.04 * CUSTOMERS[type].repWeight, 0, 5); r.day.lost++; }
   s.lifetime.lost++;
   emit('customerLeft', { restaurant: restId, customerId, reason });
 }
@@ -417,14 +424,14 @@ export function addPieces(s: GameState, n: number, recipe?: string, offline = fa
 }
 
 // ---------------------------------------------------------------- per-restaurant tick
-export function takeoutPerMin(s: GameState, restId: string, activeDistrict: DistrictId | null): number {
+export function takeoutPerMin(s: GameState, restId: string, activeDistrict: string | null): number {
   if (!isAutomated(s, restId)) return 0;
   const d = demandPerMin(s, restId);
   const visible = PROPERTIES[restId].district === activeDistrict ? visibleSpawnPerMin(s, restId) : 0;
   return Math.max(0, d - visible);
 }
 
-export function tickRestaurant(s: GameState, restId: string, dt: number, activeDistrict: DistrictId | null): void {
+export function tickRestaurant(s: GameState, restId: string, dt: number, activeDistrict: string | null): void {
   const r = s.restaurants[restId];
   // 1) off-screen takeout arrivals
   const auto = isAutomated(s, restId);
@@ -445,10 +452,10 @@ export function tickRestaurant(s: GameState, restId: string, dt: number, activeD
     while (r.takeoutFrac >= 1) {
       r.takeoutFrac -= 1;
       if (r.orders.filter((t) => t.customerId === null).length >= cap) continue; // kitchen swamped: walk-away, no rep hit
-      const type = pickCustomerType(s, PROPERTIES[restId].district);
+      const type = pickCustomerType(s, PROPERTIES[restId].district, s.minute, restId);
       const o = makeOrder(s, restId, type);
       if (!o) { s.lifetime.lost++; continue; }
-      if (acceptOrder(s, restId, { ...o, type, customerId: null }) === 'nostock') { s.lifetime.lost++; warnStock(s, restId, o.recipe); }
+      if (acceptOrder(s, restId, { ...o, type, customerId: null }) === 'nostock') { s.lifetime.lost++; r.day.lost++; warnStock(s, restId, o.recipe); }
     }
   }
   // 2) kitchen — visible customers first, then takeout
@@ -497,7 +504,7 @@ export function gainXp(s: GameState, e: Employee, amount: number): void {
 }
 
 // ---------------------------------------------------------------- global tick
-export interface TickCtx { activeDistrict: DistrictId | null }
+export interface TickCtx { activeDistrict: string | null }
 
 let restockTimer = 0;
 
@@ -541,9 +548,11 @@ export function franchiseRoyaltyPerPiece(s: GameState): number {
 }
 
 // ---------------------------------------------------------------- day end
+export const restaurantRent = (s: GameState, id: string) => Math.round(PROPERTIES[id].rent * conceptOf(s, id).rent);
+
 export function dailyCosts(s: GameState): { wages: number; rent: number } {
   const wages = s.staff.filter((e) => e.restaurant).reduce((a, e) => a + e.wage, 0) + s.staff.filter((e) => !e.restaurant).reduce((a, e) => a + e.wage * 0.5, 0);
-  const rent = Object.keys(s.restaurants).reduce((a, id) => a + PROPERTIES[id].rent, 0);
+  const rent = Object.keys(s.restaurants).reduce((a, id) => a + restaurantRent(s, id), 0);
   return { wages, rent };
 }
 
@@ -551,6 +560,13 @@ export function endDay(s: GameState): void {
   const { wages, rent } = dailyCosts(s);
   const cost = wages + rent;
   s.cash -= cost; s.lifetime.expenses += cost; s.today.expenses += cost;
+  for (const r of Object.values(s.restaurants)) {
+    r.day.cost += staffAt(s, r.id).reduce((a, e) => a + e.wage, 0) + restaurantRent(s, r.id);
+    r.hist.push({ ...r.day });
+    if (r.hist.length > 14) r.hist.shift();
+    r.day = emptyDay(s.day + 1);
+    r.log = [];
+  }
   const summary = { ...s.today };
   emit('dayEnd', summary);
   s.history.push(summary);
@@ -669,7 +685,7 @@ export function offlineProgress(s: GameState, seconds: number): { seconds: numbe
     const pps = Math.min(demandPPS, kitchenRate(s, r.id) / avgPrep) * m.offlineEff;
     const p = Math.floor(pps * seconds);
     // this location's wages + rent for the period (staff work half the hours of a full day cycle)
-    const upkeep = (staffAt(s, r.id).reduce((a, e) => a + e.wage, 0) + PROPERTIES[r.id].rent) * (seconds / DAY_SECONDS) * 0.5;
+    const upkeep = (staffAt(s, r.id).reduce((a, e) => a + e.wage, 0) + restaurantRent(s, r.id)) * (seconds / DAY_SECONDS) * 0.5;
     const rev = p * avgPrice, exp = Math.min(rev, p * avgCost + upkeep); // a managed restaurant never loses money offline
     pieces += p; revenue += rev; expenses += exp;
     r.served += Math.round(p / 3); r.revenue += rev;

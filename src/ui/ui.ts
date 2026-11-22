@@ -1,4 +1,5 @@
 // UI root: HUD, title screen, modal stack and every in-game window.
+import { AREAS } from '../core/data';
 import '@fontsource/dela-gothic-one/400.css';
 import '@fontsource/zen-maru-gothic/500.css';
 import '@fontsource/zen-maru-gothic/700.css';
@@ -534,7 +535,7 @@ export class UI {
   // ================================================================ property dialog
   openProperty(propId: string): void {
     if (this.has('prop')) return;
-    const p = PROPERTIES[propId], s = this.host.s, d = DISTRICTS[p.district];
+    const p = PROPERTIES[propId], s = this.host.s, d = AREAS[p.district];
     const { m, body } = this.window('prop', `🏷️ For Sale: ${esc(p.name)}`, 560);
     const open = s.districts.includes(p.district);
     body.innerHTML = `<div class="row" style="gap:14px"><div style="font-size:64px">${{ stand: '🛖', shop: '🏠', restaurant: '🏯', flagship: '🏙️' }[p.kind]}</div>

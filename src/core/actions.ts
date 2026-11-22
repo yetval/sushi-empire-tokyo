@@ -6,6 +6,7 @@ import {
 } from './data';
 import { yen } from './format';
 import { GameState, newRestaurant } from './state';
+import { AREAS, CONCEPTS, ConceptId, RECIPES, Role } from './data';
 import { seasonalRecipes } from './seasons';
 import { buyoutCost, hireCost, mods, neededIngredients, slotsFor, spend, staffAt } from './sim';
 
@@ -83,27 +84,79 @@ export function train(s: GameState, empId: number): Result {
   return null;
 }
 
-export function unlockDistrict(s: GameState, d: DistrictId): Result {
-  const def = DISTRICTS[d];
+/** Unlock any area: a walkable district (metro) or a management-only area (other wards, Japan, the world). */
+export function unlockDistrict(s: GameState, d: string): Result {
+  const def = AREAS[d];
+  if (!def) return 'Unknown area';
   if (s.districts.includes(d)) return 'Already unlocked';
+  if (def.unlock.chapter2 && !s.flags.chapter2) return 'Sell 1,000,000 pieces first (Chapter 2)';
   if (s.lifetime.pieces < def.unlock.pieces) return `Sell ${def.unlock.pieces.toLocaleString()} pieces first`;
   if (!spend(s, def.unlock.cost)) return `Need ${yen(def.unlock.cost)} (business permit)`;
   s.districts.push(d);
-  toast(`🗾 ${def.name} unlocked! Take the metro to visit.`, 'gold');
+  toast(def.walkable ? `🗾 ${def.name} unlocked! Take the metro to visit.` : `🗾 ${def.name} unlocked! Run restaurants there from the empire ledger.`, 'gold');
   emit('purchase', { what: d });
   return null;
 }
 
-export function buyProperty(s: GameState, propId: string): Result {
+/** Up-front cost to open (or convert to) a concept on a lot: the fit-out. */
+export function fitoutCost(propId: string, concept: ConceptId): number {
+  const c = CONCEPTS[concept];
+  return c.fitout ? Math.round(Math.max(15_000, PROPERTIES[propId].price * c.fitout)) : 0;
+}
+
+export function conceptAllowed(s: GameState, propId: string, concept: ConceptId): Result {
+  const p = PROPERTIES[propId], c = CONCEPTS[concept];
+  if ((p.kind === 'stand') !== (concept === 'stand')) return p.kind === 'stand' ? 'This lot only fits a street stand' : 'Stands go on street-stand lots';
+  if (s.lifetime.pieces < c.unlockPieces) return `${c.name} unlocks at ${c.unlockPieces.toLocaleString()} pieces sold`;
+  return null;
+}
+
+export function buyProperty(s: GameState, propId: string, concept: ConceptId = PROPERTIES[propId]?.kind === 'stand' ? 'stand' : 'bar'): Result {
   const p = PROPERTIES[propId];
+  if (!p) return 'Unknown lot';
   if (s.restaurants[propId]) return 'Already owned';
-  if (!s.districts.includes(p.district)) return `Unlock ${DISTRICTS[p.district].name} first`;
-  if (!spend(s, p.price)) return `Need ${yen(p.price)}`;
-  s.restaurants[propId] = newRestaurant(propId, s.day, s.brand);
-  s.restaurants[propId].menu = s.recipes.slice(0, 6);
-  toast(`🎉 Grand opening: ${p.name}!`, 'gold');
+  if (!s.districts.includes(p.district)) return `Unlock ${AREAS[p.district].name} first`;
+  const err = conceptAllowed(s, propId, concept);
+  if (err) return err;
+  const cost = p.price + fitoutCost(propId, concept);
+  if (!spend(s, cost)) return `Need ${yen(cost)}`;
+  s.restaurants[propId] = newRestaurant(propId, s.day, s.brand, concept);
+  const r = s.restaurants[propId];
+  // sensible default menus per format
+  const byPrice = [...s.recipes].sort((a, b) => RECIPES[a].price - RECIPES[b].price);
+  r.menu = concept === 'omakase' ? byPrice.slice(-6) : concept === 'kaiten' || concept === 'kiosk' ? byPrice.slice(0, 6) : s.recipes.slice(0, 6);
+  if (concept === 'omakase') r.priceMult = 1.2;
+  toast(`🎉 Grand opening: ${p.name} (${CONCEPTS[concept].name})!`, 'gold');
   emit('purchase', { what: propId });
   changed();
+  return null;
+}
+
+/** Convert an owned restaurant to another format. Costs the fit-out; staff, upgrades and reputation stay. */
+export function setConcept(s: GameState, restId: string, concept: ConceptId): Result {
+  const r = s.restaurants[restId];
+  if (!r) return 'Not owned';
+  if (r.concept === concept) return 'Already that format';
+  const err = conceptAllowed(s, restId, concept);
+  if (err) return err;
+  const cost = fitoutCost(restId, concept);
+  if (!spend(s, cost)) return `Need ${yen(cost)}`;
+  r.concept = concept;
+  // extra chefs/servers beyond the new format's slots are moved to the unassigned pool
+  for (const role of ['chef', 'server'] as Role[]) staffAt(s, restId, role).slice(slotsFor(s, restId, role)).forEach((e) => (e.restaurant = null));
+  toast(`${CONCEPTS[concept].emoji} ${r.name} is now a ${CONCEPTS[concept].name}!`, 'good');
+  changed();
+  return null;
+}
+
+/** House rules (auto-hire / smart pricing) need a manager at that restaurant or the Operations Center research. */
+export const canUsePolicies = (s: GameState, restId: string) => s.research.includes('ops_center') || staffAt(s, restId, 'manager').length > 0;
+
+export function setPolicy(s: GameState, restId: string, key: 'autoHire' | 'autoPrice', on: boolean): Result {
+  const r = s.restaurants[restId];
+  if (!r) return 'Not owned';
+  if (on && !canUsePolicies(s, restId)) return 'Needs a manager here, or research Operations Center';
+  r.policy[key] = on;
   return null;
 }
 

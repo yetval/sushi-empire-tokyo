@@ -6,7 +6,7 @@ import { emit, on } from '../core/bus';
 import { CUSTOMERS, CustomerType, DISTRICTS, PROPERTIES, RECIPES } from '../core/data';
 import * as sim from '../core/sim';
 import { Avatar, Employee, GameState } from '../core/state';
-import { Anim, Character, Outfit } from '../engine/character';
+import { Anim, Character, FACE_STYLE_NAMES, Outfit } from '../engine/character';
 import { makePlate } from '../world/sushi';
 import { DistrictScene, RestaurantSite, Spot } from '../world/types';
 import { Bubble } from './bubble';
@@ -20,13 +20,14 @@ const rnd = (a: number, b: number) => a + Math.random() * (b - a);
 const pick = <T>(a: readonly T[]): T => a[Math.floor(Math.random() * a.length)];
 const SKINS = ['#f1c27d', '#e0ac69', '#ffdbac', '#c68642', '#8d5524', '#f5d0b0'];
 const HAIRS = ['#1b1b1b', '#2b1d14', '#5a3825', '#a0522d', '#d4a373', '#7b7b7b', '#3d2b56', '#c0392b'];
-const BRIGHT = ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a29bfe', '#fd79a8', '#55efc4', '#74b9ff', '#fab1a0', '#81ecec'];
+const STREET_COLORS = ['#b75e50', '#367876', '#c2a466', '#5e658e', '#9a5971', '#78937a', '#6686a1', '#b88670'];
 const PANTS = ['#2d3142', '#3d405b', '#5c4b51', '#283845', '#6d6875', '#1e3d59', '#7f8c8d'];
+const STORY_HEIGHT: Record<string, number> = { kenji: 0.9, mika: 0.96, sato: 1.07, ryo: 1.04, aoki: 0.99 };
 
 let nextCustomerId = Math.floor(Date.now() % 1e9) * 10; // unique across reloads; never collides with old tickets
 
 function baseAvatar(): Avatar {
-  return { skin: pick(SKINS), hair: pick(HAIRS), hairStyle: Math.floor(Math.random() * 9), shirt: pick(BRIGHT), pants: pick(PANTS), headwear: 0 };
+  return { skin: pick(SKINS), hair: pick(HAIRS), hairStyle: Math.floor(Math.random() * 9), shirt: pick(STREET_COLORS), pants: pick(PANTS), headwear: 0, faceStyle: Math.floor(Math.random() * FACE_STYLE_NAMES.length) };
 }
 
 // ---------------------------------------------------------------- props held in hands / on heads
@@ -40,17 +41,52 @@ const propMat = (c: string, extra: THREE.MeshStandardMaterialParameters = {}) =>
 };
 const geoCache = new Map<string, THREE.BufferGeometry>();
 const geo = (k: string, make: () => THREE.BufferGeometry) => { let g = geoCache.get(k); if (!g) { g = make(); geoCache.set(k, g); } return g; };
-function phone(): THREE.Object3D { const m = new THREE.Mesh(geo('phone', () => new THREE.BoxGeometry(0.08, 0.15, 0.015)), propMat('#222')); m.position.set(0.1, 0.2, 0.05); return m; }
-function notepad(): THREE.Object3D { const m = new THREE.Mesh(geo('notepad', () => new THREE.BoxGeometry(0.16, 0.2, 0.02)), propMat('#f5f0e1')); m.rotation.x = -0.6; return m; }
-function clipboard(): THREE.Object3D { const m = new THREE.Mesh(geo('clip', () => new THREE.BoxGeometry(0.2, 0.26, 0.02)), propMat('#a0703c')); m.rotation.x = -0.5; return m; }
-function camera(): THREE.Object3D { const m = new THREE.Mesh(geo('cam', () => new THREE.BoxGeometry(0.16, 0.1, 0.08)), propMat('#333')); m.position.y = 0.02; return m; }
-function crown(): THREE.Object3D {
-  const g = new THREE.Group();
-  const gold = propMat('#ffd23f', { metalness: 0.7, roughness: 0.3, side: THREE.DoubleSide });
-  g.add(new THREE.Mesh(geo('crownBand', () => new THREE.CylinderGeometry(0.17, 0.17, 0.09, 12, 1, true)), gold));
-  for (let i = 0; i < 6; i++) { const p = new THREE.Mesh(geo('crownTip', () => new THREE.ConeGeometry(0.035, 0.09, 4)), gold); const a = (i / 6) * Math.PI * 2; p.position.set(Math.cos(a) * 0.16, 0.08, Math.sin(a) * 0.16); g.add(p); }
-  g.position.y = -0.22;
-  return g;
+function accessory(key: string, color: string, dimensions: [number, number, number], position: [number, number, number]): THREE.Mesh {
+  const mesh = new THREE.Mesh(geo(key, () => new THREE.BoxGeometry(...dimensions)), propMat(color));
+  mesh.position.set(...position);
+  return mesh;
+}
+
+function phone(): THREE.Object3D {
+  const group = new THREE.Group();
+  group.add(accessory('phone', '#8d5e57', [0.084, 0.15, 0.015], [0, 0, 0]),
+    accessory('phone-screen', '#2e363e', [0.073, 0.124, 0.004], [0, 0, 0.008]));
+  group.position.set(0.1, 0.2, 0.05);
+  return group;
+}
+
+function notepad(): THREE.Object3D {
+  const group = new THREE.Group();
+  group.add(accessory('pad-cover', '#6c5546', [0.164, 0.21, 0.018], [0, 0, 0]),
+    accessory('pad-paper', '#e8dcc5', [0.149, 0.194, 0.007], [0, -0.003, 0.010]));
+  for (const y of [-0.054, -0.027, 0, 0.027]) {
+    group.add(accessory('pad-rule', '#9c9c8b', [0.113, 0.003, 0.002], [0, y, 0.014]));
+  }
+  group.add(accessory('pad-binding', '#847052', [0.154, 0.019, 0.008], [0, 0.086, 0.014]));
+  group.rotation.x = -0.55;
+  return group;
+}
+
+function clipboard(): THREE.Object3D {
+  const group = new THREE.Group();
+  group.add(accessory('clip-board', '#8b694e', [0.20, 0.26, 0.02], [0, 0, 0]),
+    accessory('clip-paper', '#e4d8bc', [0.174, 0.215, 0.006], [0, -0.01, 0.012]),
+    accessory('clip-metal', '#ad9467', [0.087, 0.035, 0.012], [0, 0.104, 0.017]));
+  group.rotation.x = -0.5;
+  return group;
+}
+
+function camera(): THREE.Object3D {
+  const group = new THREE.Group();
+  group.add(accessory('camera', '#353537', [0.16, 0.10, 0.075], [0, 0.018, 0]),
+    accessory('camera-viewfinder', '#b29772', [0.036, 0.026, 0.009], [0.053, 0.048, 0.039]),
+    accessory('camera-grip', '#55443d', [0.037, 0.087, 0.009], [-0.061, 0.016, 0.039]));
+  const lens = new THREE.Mesh(geo('camera-lens', () => new THREE.CylinderGeometry(0.037, 0.041, 0.041, 12)), propMat('#997e61'));
+  lens.rotation.x = Math.PI / 2; lens.position.set(-0.005, 0.013, 0.051);
+  const glass = new THREE.Mesh(geo('camera-glass', () => new THREE.SphereGeometry(0.030, 10, 5)), propMat('#394c51', { roughness: 0.2 }));
+  glass.scale.z = 0.17; glass.position.set(-0.005, 0.013, 0.073);
+  group.add(lens, glass);
+  return group;
 }
 function umbrella(color: string): THREE.Object3D {
   const g = new THREE.Group();
@@ -63,18 +99,50 @@ function umbrella(color: string): THREE.Object3D {
 }
 
 /** Looks per customer type. Returns avatar, outfit and props. */
-function customerLook(type: CustomerType): { a: Avatar; o: Outfit; hand?: THREE.Object3D; head?: THREE.Object3D } {
+function customerLook(type: CustomerType): { a: Avatar; o: Outfit; hand?: THREE.Object3D } {
   const a = baseAvatar();
   switch (type) {
-    case 'office': a.shirt = '#f8f9fa'; a.pants = '#2d3142'; a.hairStyle = pick([0, 2, 4]); return { a, o: { tie: pick(['#c0392b', '#2b5aa8', '#6c3483']), vest: '#3a3f58' } };
-    case 'student': a.shirt = pick(['#1f3a68', '#f8f9fa', '#2c3e50']); a.pants = '#1f2a44'; return { a, o: { bag: pick(['#e17055', '#0984e3', '#00b894', '#fdcb6e']), tie: a.shirt === '#f8f9fa' ? '#c0392b' : undefined } };
-    case 'tourist': a.shirt = pick(BRIGHT); a.headwear = 3; a.pants = '#c8b88a'; return { a, o: { bag: '#6d4c41' }, hand: camera() };
-    case 'family': a.shirt = pick(BRIGHT); return { a, o: {} };
-    case 'foodie': a.shirt = pick(['#e67e22', '#16a085', '#8e44ad']); return { a, o: { vest: '#5d4037' } };
-    case 'wealthy': a.shirt = '#f8f9fa'; a.pants = '#111'; a.hairStyle = pick([0, 3]); return { a, o: { vest: '#151515', tie: '#c9a227' } };
-    case 'influencer': a.shirt = pick(['#fd79a8', '#e84393', '#a29bfe']); a.hairStyle = pick([2, 3]); a.hair = pick(['#f8c291', '#e84393', '#1b1b1b']); return { a, o: {}, hand: phone() };
-    case 'critic': a.shirt = '#2d2d2d'; a.pants = '#1a1a1a'; a.hairStyle = 3; a.hair = '#7b7b7b'; return { a, o: { vest: '#111111', tie: '#7d1d1d' }, hand: notepad() };
-    case 'vip': a.shirt = '#fff6d5'; a.pants = '#2b2b2b'; return { a, o: { vest: '#c9a227', tie: '#8e1b1b' }, head: crown() };
+    case 'office':
+      a.shirt = pick(['#e6dccb', '#c2ccd0', '#e0c9c2']);
+      a.pants = '#3a4149';
+      a.hairStyle = pick([0, 5, 8]);
+      return { a, o: { cut: 'blazer', vest: pick(['#344354', '#534b47', '#424650']), tie: pick(['#934b48', '#537670', '#826b4b']), glasses: pick(['square', undefined, undefined]) } };
+    case 'student':
+      a.shirt = '#dfd8bd';
+      a.pants = '#323a4c';
+      a.hairStyle = pick([1, 5, 6, 7]);
+      return { a, o: { cut: 'workwear', vest: pick(['#41556b', '#496457', '#685457']), trim: '#aaa388', bag: pick(['#a1664b', '#54677c', '#796e4c']) } };
+    case 'tourist':
+      a.headwear = pick([0, 3, 3]);
+      a.pants = '#ae9676';
+      return { a, o: { cut: 'workwear', vest: pick(['#586f5d', '#aa7551', '#585476']), trim: '#c2aa78', bag: '#5a473a', detail: 'freckles' }, hand: camera() };
+    case 'family':
+      return { a, o: { cut: 'knit', trim: pick(['#bab18b', '#d2af94', '#c8c4b0']) } };
+    case 'foodie':
+      a.shirt = pick(['#927350', '#437473', '#795675']);
+      return { a, o: { cut: 'knit', trim: '#d3a67b', detail: pick(['freckles', 'earrings', 'stubble']) } };
+    case 'wealthy':
+      a.shirt = '#e9dfd2';
+      a.pants = '#32343d';
+      a.hairStyle = pick([3, 5, 8]);
+      return { a, o: { cut: 'blazer', vest: pick(['#38453d', '#524252', '#263948']), tie: '#ba8d56', glasses: pick(['round', undefined]), detail: 'earrings' } };
+    case 'influencer':
+      a.shirt = pick(['#c77d83', '#9d6e8a', '#708092']);
+      a.hairStyle = pick([2, 5, 6]);
+      a.hair = pick(['#c9936c', '#74405a', '#231e21']);
+      return { a, o: { cut: 'knit', trim: '#e7cabd', detail: 'earrings' }, hand: phone() };
+    case 'critic':
+      a.shirt = '#d7c2ac';
+      a.pants = '#383449';
+      a.hairStyle = 3;
+      a.hair = '#78716d';
+      a.faceStyle = 1;
+      return { a, o: { cut: 'blazer', vest: '#48405b', glasses: 'square', detail: 'earrings' }, hand: notepad() };
+    case 'vip':
+      a.shirt = '#e8dbc4';
+      a.pants = '#3d3c51';
+      a.hairStyle = 8;
+      return { a, o: { cut: 'blazer', vest: '#422e3e', tie: '#b98a51', glasses: 'round', trim: '#cead70' } };
   }
 }
 
@@ -128,7 +196,7 @@ export class NPCManager {
     for (const rt of this.sites.values()) rt.stand = rt.standSpots.map(() => null);
     this.spawnPeds(s);
     for (const n of d.storyNpcs) {
-      const ch = new Character(storyAvatar(n.id), storyOutfit(n.id));
+      const ch = new Character(storyAvatar(n.id), storyOutfit(n.id), STORY_HEIGHT[n.id]);
       if (n.id === 'aoki') ch.hands.add(notepad());
       ch.root.position.set(n.spot.x, 0, n.spot.z); ch.root.rotation.y = n.spot.yaw;
       this.group.add(ch.root);
@@ -152,7 +220,7 @@ export class NPCManager {
       const lane = pick(this.lanes);
       const type = pick(['office', 'student', 'tourist', 'family', 'foodie', 'wealthy'] as CustomerType[]);
       const look = customerLook(type);
-      const ch = new Character(look.a, look.o);
+      const ch = new Character(look.a, look.o, rnd(0.91, 1.07));
       if (look.hand) ch.hands.add(look.hand);
       this.group.add(ch.root);
       this.peds.push({ char: ch, lane, t: Math.random() * lane.length, dir: Math.random() < 0.5 ? 1 : -1, speed: rnd(0.9, 1.6), umbrella: null, wantsUmbrella: Math.random() < 0.7 });
@@ -170,7 +238,7 @@ export class NPCManager {
       if (dx * dx + dz * dz > 1e-6) p.char.root.rotation.y = turn(p.char.root.rotation.y, Math.atan2(dx, dz), dt * 8);
       p.char.anim = 'walk'; p.char.speed = p.speed;
       const want = rain && p.wantsUmbrella;
-      if (want && !p.umbrella) { p.umbrella = umbrella(pick(BRIGHT)); p.char.headSlot.add(p.umbrella); }
+      if (want && !p.umbrella) { p.umbrella = umbrella(pick(STREET_COLORS)); p.char.headSlot.add(p.umbrella); }
       if (p.umbrella) p.umbrella.visible = want;
       animate(p.char, dt);
     }
@@ -189,12 +257,12 @@ export class NPCManager {
       if (have.has(key)) continue;
       const site = this.sites.get(e.restaurant!)!.site;
       const r = s.restaurants[e.restaurant!];
-      const a: Avatar = { ...e.look };
+      const a: Avatar = { ...e.look, faceStyle: e.look.faceStyle ?? e.id % FACE_STYLE_NAMES.length };
       let o: Outfit = {};
-      if (e.role === 'chef') { a.shirt = r.uniform; a.headwear = 1; o = { apron: true }; }
-      else if (e.role === 'server') { a.shirt = r.uniform; a.headwear = 0; o = { vest: '#2d3142' }; }
-      else if (e.role === 'cleaner') { a.shirt = '#7fb3d5'; a.headwear = 3; o = { apron: true }; }
-      else { a.shirt = '#f8f9fa'; a.pants = '#2d3142'; o = { vest: '#2d3142', tie: '#c0392b' }; }
+      if (e.role === 'chef') { a.shirt = r.uniform; a.headwear = 1; o = { cut: 'coat', apron: '#344654', trim: '#b9ad91' }; }
+      else if (e.role === 'server') { a.shirt = r.uniform; a.headwear = 0; o = { vest: '#4d4339', apron: '#6e503f', trim: '#ac8d6b' }; }
+      else if (e.role === 'cleaner') { a.shirt = '#799b91'; a.headwear = 3; o = { cut: 'workwear', vest: '#49685d', trim: '#92ab90' }; }
+      else { a.shirt = '#e9dfce'; a.pants = '#3e4149'; o = { cut: 'blazer', vest: '#393f4c', tie: '#944e42', glasses: 'square' }; }
       const ch = new Character(a, o);
       if (e.role === 'manager') ch.hands.add(clipboard());
       this.group.add(ch.root);
@@ -323,9 +391,8 @@ export class NPCManager {
     if (tutorial) order = { recipe: sim.canMake(s, 'salmon_nigiri', 2) || !s.recipes.includes('cucumber_maki') ? 'salmon_nigiri' : 'cucumber_maki', pieces: 2 };
     if (!order) return;
     const look = customerLook(type);
-    const ch = new Character(look.a, look.o);
+    const ch = new Character(look.a, look.o, rnd(0.93, 1.06));
     if (look.hand) ch.hands.add(look.hand);
-    if (look.head) ch.headSlot.add(look.head);
     const bubble = new Bubble();
     ch.root.add(bubble.group);
     const { inR, outR } = this.routes(doorV, near ? 5 : 22);
@@ -339,7 +406,7 @@ export class NPCManager {
     };
     if (type === 'family') {
       const ca = baseAvatar(); ca.hairStyle = pick([0, 3]);
-      c.child = new Character(ca, { bag: pick(BRIGHT) }, 0.62);
+      c.child = new Character({ ...ca, faceStyle: 4 }, { cut: 'knit', bag: pick(STREET_COLORS), trim: '#e0cba3' }, 0.62);
       c.child.root.position.copy(inR[0]).add(V(0.6, 0.4));
       this.group.add(c.child.root);
     }
@@ -679,19 +746,20 @@ function standSpots(site: RestaurantSite): Spot[] {
 
 function storyAvatar(id: string): Avatar {
   switch (id) {
-    case 'kenji': return { skin: '#e8b98a', hair: '#d9d9d9', hairStyle: 4, shirt: '#3b4a6b', pants: '#2d2d2d', headwear: 2 };
-    case 'mika': return { skin: '#f5d0b0', hair: '#3d2314', hairStyle: 3, shirt: '#2e86de', pants: '#34495e', headwear: 3 };
-    case 'sato': return { skin: '#f1c27d', hair: '#1b1b1b', hairStyle: 0, shirt: '#f8f9fa', pants: '#222831', headwear: 0 };
-    case 'ryo': return { skin: '#e0ac69', hair: '#1b1b1b', hairStyle: 1, shirt: '#e63946', pants: '#1d1d1d', headwear: 2 };
-    default: return { skin: '#ffdbac', hair: '#5a5a5a', hairStyle: 2, shirt: '#2d2d2d', pants: '#1a1a1a', headwear: 0 };
+    case 'kenji': return { skin: '#d5a47a', hair: '#ccc1ad', hairStyle: 4, shirt: '#5a6e78', pants: '#393b42', headwear: 2, faceStyle: 4 };
+    case 'mika': return { skin: '#e5b292', hair: '#432b2a', hairStyle: 6, shirt: '#507d7b', pants: '#465359', headwear: 0, faceStyle: 3 };
+    case 'sato': return { skin: '#c49370', hair: '#2e2b30', hairStyle: 8, shirt: '#ddd5c4', pants: '#373e48', headwear: 0, faceStyle: 1 };
+    case 'ryo': return { skin: '#b88159', hair: '#292226', hairStyle: 3, shirt: '#93463b', pants: '#3e3637', headwear: 0, faceStyle: 2 };
+    default: return { skin: '#ead2b5', hair: '#67626a', hairStyle: 5, shirt: '#cdb392', pants: '#38313d', headwear: 0, faceStyle: 0 };
   }
 }
+
 function storyOutfit(id: string): Outfit {
   switch (id) {
-    case 'kenji': return { apron: true };
-    case 'mika': return { apron: true };
-    case 'sato': return { vest: '#2d3142', tie: '#2b5aa8' };
-    case 'ryo': return { apron: true };
-    default: return { vest: '#111111', tie: '#7d1d1d' };
+    case 'kenji': return { cut: 'coat', apron: '#394956', trim: '#a7a18d', detail: 'moustache' };
+    case 'mika': return { cut: 'workwear', vest: '#5b7876', apron: '#b87848', trim: '#ce9b67', detail: 'freckles' };
+    case 'sato': return { cut: 'blazer', vest: '#3e4d59', tie: '#86976f', glasses: 'square' };
+    case 'ryo': return { cut: 'coat', apron: '#54403a', trim: '#c87f56', detail: 'stubble' };
+    default: return { cut: 'blazer', vest: '#584456', trim: '#ba936e', glasses: 'round', detail: 'earrings' };
   }
 }
