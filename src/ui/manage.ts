@@ -46,6 +46,7 @@ export class Manage {
   private dc: { el: HTMLElement; update(dt: number): void; destroy(): void } | null = null;
   private sel: string | null = null;
   private confirmFire: number | null = null;
+  private armedAt = 0;
   private hireTo: Record<number, string> = {};
   private st: { last?: string } = {};
   private ledgerSt: { last?: string } = {};
@@ -138,7 +139,8 @@ export class Manage {
       },
       train: (id, b) => { if (run(b, A.train(s(), Number(id)), 'upgrade')) after(); },
       fire: (id, b) => {
-        if (this.confirmFire !== Number(id)) { this.confirmFire = Number(id); audio.sfx('click'); after(); return; }
+        if (this.confirmFire !== Number(id)) { this.confirmFire = Number(id); this.armedAt = performance.now(); audio.sfx('click'); after(); return; }
+        if (performance.now() - this.armedAt < 400) return; // a double-click must not confirm
         this.confirmFire = null; run(b, A.fire(s(), Number(id)), 'whoosh'); after();
       },
       buy: (arg, b) => {

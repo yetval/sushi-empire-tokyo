@@ -128,7 +128,10 @@ export class Sheet {
   private pickC: ConceptId | null = null;
   private confirmFire: number | null = null;
 
-  constructor(private host: UIHost, id: string, private close: () => void) {
+  private headSt: { last?: string } = {};
+  private armedAt = 0;
+
+  constructor(private host: UIHost, id: string, private close: () => void, private browseLots: () => void = () => {}) {
     this.id = id;
     this.el = el('div', 'modal sheet-wrap');
     this.el.innerHTML = `<aside class="panel sheet"><header class="sheet-head"></header>
@@ -175,12 +178,12 @@ export class Sheet {
     const ids = Object.keys(s.restaurants);
     const i = ids.indexOf(this.id);
     const auto = sim.isAutomated(s, this.id);
-    (this.el.querySelector('.sheet-head') as HTMLElement).innerHTML = `
+    patch(this.el.querySelector('.sheet-head') as HTMLElement, `
       <span class="big-seal" style="--ink:${CONCEPT_INK[r.concept]}" aria-hidden="true">${KANJI[r.concept]}</span>
-      <div class="sh-title"><h2>${esc(r.name)}</h2><div>${a.jp} ${esc(a.name)} · ${c.name} ${c.jp} · ${p.kind}</div></div>
+      <div class="sh-title"><h2 id="sheet-title" title="${esc(r.name)}">${esc(r.name)}</h2><div>${a.jp} ${esc(a.name)} · ${c.name} ${c.jp} · ${p.kind}</div></div>
       <span class="sh-status ${auto ? 'ok' : 'no'}">${auto ? '自動 · runs itself' : '手 · needs crew'}</span>
-      <div class="sh-nav">${ids.length > 1 ? `<button class="sq" data-nav="${ids[(i - 1 + ids.length) % ids.length]}" aria-label="Previous restaurant">‹</button><span class="tiny">${i + 1}/${ids.length}</span><button class="sq" data-nav="${ids[(i + 1) % ids.length]}" aria-label="Next restaurant">›</button>` : ''}
-      <button class="x" aria-label="Close">✕</button></div>`;
+      <div class="sh-nav">${ids.length > 1 ? `<button class="sq" data-act="prev" data-arg="p" data-nav="${ids[(i - 1 + ids.length) % ids.length]}" aria-label="Previous restaurant">‹</button><span class="tiny">${i + 1}/${ids.length}</span><button class="sq" data-act="next" data-arg="n" data-nav="${ids[(i + 1) % ids.length]}" aria-label="Next restaurant">›</button>` : ''}
+      <button class="x" data-act="close" data-arg="x" aria-label="Close">✕</button></div>`, this.headSt);
     const html = (this as any)['r_' + this.tab]() as string;
     patch(this.body, html, this.st);
   }
@@ -200,14 +203,17 @@ export class Sheet {
       go: (t) => this.show(t as SheetTab),
       fix: (aid, b) => {
         const a = E.alerts(s()).find((x) => x.id === aid);
-        if (!a) return after();
-        const share = a.fix ? { ...a.fix, cost: Math.ceil(a.fix.cost / Math.max(1, a.restIds.length)) } : undefined;
-        if (run(b, E.applyFix(s(), { ...a, restIds: a.restIds.length ? [id()] : [], fix: share }), 'coin')) after();
+        const f = a && this.localFix(a);
+        if (!f) return after();
+        if (s().cash < f.cost) return fail(b, `Need ${yen(f.cost)}`);
+        if (run(b, f.apply(), 'coin')) after();
       },
+      lots: () => { this.close(); this.browseLots(); },
       hirebest: (role, b) => { if (run(b, E.hireBest(s(), id(), role as Role), 'coin')) after(); },
       train: (eid, b) => { if (run(b, A.train(s(), Number(eid)), 'upgrade')) after(); },
       fire: (eid, b) => {
-        if (this.confirmFire !== Number(eid)) { this.confirmFire = Number(eid); audio.sfx('click'); return after(); }
+        if (this.confirmFire !== Number(eid)) { this.confirmFire = Number(eid); this.armedAt = performance.now(); audio.sfx('click'); return after(); }
+        if (performance.now() - this.armedAt < 400) return; // a double-click must not confirm
         this.confirmFire = null; run(b, A.fire(s(), Number(eid)), 'whoosh'); after();
       },
       menu: (rc, b) => { if (run(b, A.toggleMenu(s(), id(), rc), 'pop')) after(); },
@@ -238,6 +244,27 @@ export class Sheet {
     });
   }
 
+  /** What an alert's fix does for THIS restaurant: true cost and action. Restock is empire-wide by nature. */
+  private localFix(a: E.Alert): { label: string; cost: number; apply: () => string | null } | null {
+    if (!a.fix) return null;
+    const s = this.s, id = this.id;
+    const best = (role: Role) => { const c = s.candidates.filter((e) => e.role === role).sort((x, y) => y.skill - x.skill)[0]; return c ? sim.hireCost(c) : ROLES[role].hireCost; };
+    switch (a.fix.id) {
+      case 'restock': return { label: `${a.fix.label} for all kitchens`, cost: a.fix.cost, apply: () => E.applyFix(s, a) };
+      case 'hireMissing': {
+        const roles: Role[] = [];
+        if (!sim.staffAt(s, id, 'chef').length) roles.push('chef');
+        if (CONCEPTS[this.r.concept].needsServer && !sim.staffAt(s, id, 'server').length && !sim.staffAt(s, id, 'manager').length) roles.push('server');
+        return { label: `Hire ${roles.join(' + ') || 'crew'}`, cost: roles.reduce((t, r) => t + best(r), 0), apply: () => roles.map((r) => E.hireBest(s, id, r)).find(Boolean) ?? null };
+      }
+      case 'hireChef': return { label: 'Hire a chef', cost: best('chef'), apply: () => E.hireBest(s, id, 'chef') };
+      case 'hireCleaner': return { label: 'Hire a cleaner', cost: best('cleaner'), apply: () => E.hireBest(s, id, 'cleaner') };
+      case 'priceUp': return { label: 'Prices +10%', cost: 0, apply: () => { A.setPrice(s, id, this.r.priceMult * 1.1); return null; } };
+      case 'priceDown': return { label: 'Prices −10%', cost: 0, apply: () => { A.setPrice(s, id, this.r.priceMult / 1.1); return null; } };
+    }
+    return null;
+  }
+
   private kpi() { return E.restaurantKPIs(this.s).find((k) => k.id === this.id)!; }
 
   // ------------------------------------------------------------ overview
@@ -258,7 +285,7 @@ export class Sheet {
           <div><span>Stock</span><b>${Number.isFinite(k.stockDays) ? `${k.stockDays.toFixed(1)}d` : '—'}</b><small>of ingredients</small></div>
         </div></div>
       ${al.length ? `<div class="section slips">${al.map((a) => `<div class="slip ${a.severity}"><span class="sev">${a.severity === 'critical' ? '急' : a.severity === 'warning' ? '注' : '機'}</span><span class="txt">${esc(a.text)}</span>
-        ${a.fix ? `<button class="btn small" data-act="fix" data-arg="${a.id}">${esc(a.fix.label)}${a.fix.cost ? ` · ${yen(Math.ceil(a.fix.cost / Math.max(1, a.restIds.length)))}` : ''}</button>` : ''}
+        ${(() => { const f = this.localFix(a); return f ? `<button class="btn small" data-act="fix" data-arg="${a.id}">${esc(f.label)}${f.cost ? ` · ${yen(f.cost)}` : ''}</button>` : ''; })()}
         ${a.rule && a.rule !== 'autoRestock' ? `<button class="btn small ghost" data-act="go" data-arg="rules">Make it a rule</button>` : ''}</div>`).join('')}</div>`
         : '<div class="section slip calm"><span class="sev">安</span><span class="txt">All quiet here. Nothing needs you.</span></div>'}
       <div class="section"><h3>Last 7 days <span class="tiny muted">revenue · cost · profit line</span></h3>${pnlChart(days, 110, days.map((d) => 'D' + d.day))}</div>
@@ -359,7 +386,15 @@ export class Sheet {
   r_format(): string {
     const s = this.s, r = this.r, pick = this.pickC && this.pickC !== r.concept ? this.pickC : null;
     const why = pick ? A.conceptAllowed(s, this.id, pick) : null, cost = pick ? A.fitoutCost(this.id, pick) : 0;
-    return `<p class="small muted">Switching format refits the place: staff, upgrades and reputation stay; extra chefs or servers beyond the new format's slots go to the reserve pool. Rent becomes ${yen(sim.restaurantRent(s, this.id))}/day today.</p>
+    if (PROPERTIES[this.id].kind === 'stand') return `<div class="slip opportunity"><span class="sev">屋</span><span class="txt">Stands stay stands: a street-stand lot only fits a yatai. To run a kiosk, kaiten belt, omakase room or ghost kitchen, buy a proper lot and pick its format there.</span><button class="btn small" data-act="lots">Browse lots</button></div>
+      <div class="concepts section">${conceptCards(s, this.id, r.concept, 'switch')}</div>`;
+    const c = pick ? CONCEPTS[pick] : null;
+    const bumped = pick ? (['chef', 'server'] as Role[]).map((role) => {
+      const have = sim.staffAt(s, this.id, role).length;
+      const slots = role === 'chef' ? Math.max(1, Math.round(sim.chefSlots(s, this.id) * c!.staff)) : c!.needsServer ? PROPERTIES[this.id].serverSlots : 0;
+      return have > slots ? `${have - slots} ${role}${have - slots > 1 ? 's' : ''} → reserve at half wage` : '';
+    }).filter(Boolean) : [];
+    return `<p class="small muted">Switching format refits the place: staff, upgrades and reputation stay. ${pick ? `As a ${c!.name}, rent would be <b>${yen(Math.round(PROPERTIES[this.id].rent * c!.rent))}/day</b>${bumped.length ? `; <b>${bumped.join(', ')}</b>` : '; nobody is moved'}.` : `Rent today: ${yen(sim.restaurantRent(s, this.id))}/day.`}</p>
       <div class="concepts">${conceptCards(s, this.id, pick ?? r.concept, 'switch')}</div>
       <div class="buybar">${pick ? `<span>Convert to <b>${CONCEPTS[pick].name}</b> for <b>${yen(cost)}</b></span><button class="btn big" data-act="convert" ${why ? 'disabled' : ''}>${why ? esc(why) : 'Refit 改装'}</button>` : '<span class="muted">Pick a format above to compare.</span>'}</div>`;
   }

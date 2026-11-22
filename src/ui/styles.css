@@ -479,7 +479,7 @@ table.kv { width: 100%; border-collapse: collapse; font-size: 13.5px; } table.kv
 .sheet-head { position: relative; display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 14px; padding: 18px 20px 16px; overflow: hidden;
   background: var(--grain), linear-gradient(180deg, #2a221d, var(--lacquer)); color: var(--washi); border-bottom: 3px solid #000; }
 .sheet-head::after { /* gold rule */ content: ''; position: absolute; left: 0; right: 0; bottom: 4px; height: 2px; background: linear-gradient(90deg, transparent, var(--kin), transparent); opacity: .6; }
-.big-seal { width: 64px; height: 64px; display: grid; place-items: center; font: 400 38px var(--display); color: var(--washi); background: var(--grain), var(--ink); border-radius: 6px; transform: rotate(-5deg); box-shadow: inset 0 0 0 3px rgba(255, 235, 210, .22), 0 6px 14px rgba(0, 0, 0, .5); }
+.big-seal { width: 64px; height: 64px; display: grid; place-items: center; font: 900 36px var(--body); color: var(--washi); background: var(--grain), var(--ink); border-radius: 6px; transform: rotate(-5deg); box-shadow: inset 0 0 0 3px rgba(255, 235, 210, .22), 0 6px 14px rgba(0, 0, 0, .5); }
 .sh-title h2 { margin: 0; font-size: 26px; color: var(--washi); }
 .sh-title div { font-size: 13px; font-weight: 700; color: #cbbca5; margin-top: 2px; }
 .sh-status { font: 900 12.5px var(--body); padding: 6px 10px; border-radius: 3px; letter-spacing: .04em; }
@@ -573,7 +573,7 @@ table.books tfoot td { border-top: 2px solid var(--sumi); font-weight: 900; }
 .concept.sel { outline: 3px solid var(--ink); outline-offset: 3px; transform: translateY(-4px); }
 .concept.cur::after { content: '現'; position: absolute; right: 10px; top: 6px; z-index: 2; font: 900 15px var(--body); color: var(--washi); border: 2px solid var(--washi); border-radius: 50%; width: 32px; height: 32px; display: grid; place-items: center; transform: rotate(-12deg); }
 .concept.locked { cursor: not-allowed; filter: grayscale(.7); opacity: .7; }
-.c-seal { position: absolute; left: 14px; top: 10px; width: 56px; height: 56px; display: grid; place-items: center; font: 400 30px var(--display); color: var(--ink); background: var(--washi); border: 3px solid var(--ink); border-radius: 4px; transform: rotate(-6deg); box-shadow: 0 4px 8px rgba(0, 0, 0, .3); z-index: 1; }
+.c-seal { position: absolute; left: 14px; top: 10px; width: 56px; height: 56px; display: grid; place-items: center; font: 900 29px var(--body); color: var(--ink); background: var(--washi); border: 3px solid var(--ink); border-radius: 4px; transform: rotate(-6deg); box-shadow: 0 4px 8px rgba(0, 0, 0, .3); z-index: 1; }
 .c-name { padding-left: 64px; margin-top: -50px; min-height: 44px; white-space: nowrap; overflow: hidden; color: var(--washi); position: relative; z-index: 1; display: flex; flex-direction: column; justify-content: center; }
 .c-name b { font: 400 15px var(--display); line-height: 1.15; overflow: hidden; text-overflow: ellipsis; } .c-name small { font: 800 12px var(--body); opacity: .85; letter-spacing: .1em; }
 .c-desc { font-size: 12.5px; font-weight: 700; color: var(--sumi2); min-height: 52px; line-height: 1.4; margin-top: 10px; }
@@ -623,3 +623,9 @@ table.books tfoot td { border-top: 2px solid var(--sumi); font-weight: 900; }
 /* each window is its own stacking context: dashboard tooltips/sticky rows never paint over a sheet or dialog */
 .modal { isolation: isolate; }
 .modal.closing { pointer-events: none; }
+
+/* review C */
+.sh-title { min-width: 0; } .sh-title h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.receipt .shop { overflow-wrap: anywhere; }
+/* toasts never cover an open dialog's footer (Sign the lease, Refit…): move them to the top-right */
+#ui-root:has(.modal.open:not(.sheet-wrap)) .toasts { top: 70px; bottom: auto; flex-direction: column; }

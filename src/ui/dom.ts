@@ -76,7 +76,8 @@ export function patch(container: HTMLElement, html: string, state: { last?: stri
   const scroller = container.closest('.tab-body, .modal-body') as HTMLElement | null;
   const top = scroller?.scrollTop ?? 0;
   const f = a && container.contains(a) ? (a as HTMLElement) : null;
-  const key = f?.dataset.act ? `[data-act="${f.dataset.act}"]${f.dataset.arg !== undefined ? `[data-arg="${CSS.escape(f.dataset.arg)}"]` : ''}` : null;
+  const key = f?.dataset.act ? `[data-act="${f.dataset.act}"]${f.dataset.arg !== undefined ? `[data-arg="${CSS.escape(f.dataset.arg)}"]` : ''}`
+    : f?.dataset.in ? `[data-in="${f.dataset.in}"]${f.dataset.id !== undefined ? `[data-id="${CSS.escape(f.dataset.id)}"]` : ''}` : null;
   container.innerHTML = html;
   state.last = html;
   if (scroller) scroller.scrollTop = top;

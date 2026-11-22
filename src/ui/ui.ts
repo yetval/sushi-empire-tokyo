@@ -117,6 +117,11 @@ export class UI {
     this.syncInert();
     const prev = m.prev as HTMLElement | null;
     if (prev?.isConnected && !prev.closest('[inert]')) prev.focus({ preventScroll: true });
+    else {
+      // the original target vanished (e.g. a re-rendered list): land in the window underneath instead of <body>
+      const top = this.stack[this.stack.length - 1]?.el;
+      (top?.querySelector<HTMLElement>('.tab[aria-current], .stab[aria-current], button:not([disabled])') ?? top)?.focus({ preventScroll: true });
+    }
   }
   private has(kind: string) { return this.stack.find((m) => m.kind === kind); }
 
@@ -456,7 +461,7 @@ export class UI {
     const open = this.has('sheet');
     if (open) { this.sheet!.setRestaurant(id, tab); return; }
     let m!: Modal;
-    this.sheet = new Sheet(this.host, id, () => this.remove(m));
+    this.sheet = new Sheet(this.host, id, () => this.remove(m), () => this.toggleManage(Object.keys(this.host.s.restaurants).length >= 2 ? 'daicho' : 'empire'));
     if (tab) this.sheet.show(tab);
     m = { kind: 'sheet', el: this.sheet.el, onClose: () => { this.sheet = null; }, update: (dt) => this.sheet?.update(dt) };
     audio.sfx('whoosh');
