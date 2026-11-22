@@ -271,6 +271,7 @@ export class Game implements UIHost {
     on('event', (e) => toast(`${e.emoji} ${e.name}: ${e.desc}`, 'info'));
     const q = (ev: QuestEvent) => { if (this.started) questOnEvent(this.s.quests, this.s, ev); };
     on('sale', (e) => {
+      if (!this.s.restaurants[e.restaurant]) return; // stale event (restaurant sold/converted, or another state)
       q({ type: 'sale', restaurant: e.restaurant, recipe: e.recipe, pieces: e.pieces, revenue: e.paid + e.tip, customerType: e.customerType });
       const notable = e.customerType === 'critic' || e.customerType === 'vip' || e.customerType === 'influencer';
       if (notable || Math.random() < 1 / 8) this.s.reviews[e.restaurant] = pushReview(this.s.reviews[e.restaurant] ?? [], makeReview(this.s, e.restaurant, e, Math.random));
