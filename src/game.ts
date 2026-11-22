@@ -330,15 +330,15 @@ export class Game implements UIHost {
     const nm = sim.nextMilestone(s);
     const goal = `Next: ${nm.title} — ${short(p)} / ${short(nm.pieces)} 🍣`;
     // owner-first: get the stand running itself, then grow a chain
-    if (!s.staff.some((e) => e.role === 'chef')) return 'You are the owner now: press Tab and hire a chef for the stand.';
-    if (!sim.isAutomated(s, 'asakusa_stand')) return 'Hire a server too. Chef + server = the stand runs itself.';
+    if (!s.staff.some((e) => e.role === 'chef')) return 'Hire a chef: Tab → your stand → Staff. Chefs cook every order for you.';
+    if (!sim.isAutomated(s, 'asakusa_stand')) return 'Add a server so the stand takes orders and serves on its own.';
     const n = Object.keys(s.restaurants).length;
-    if (n < 3) return `Open restaurant #${n + 1}: Tab → Empire, pick a lot and a format (kiosk, sushi bar…).`;
-    const crit = empireAlerts(s).find((a) => a.severity === 'critical');
-    if (crit) return `⚠️ ${crit.text}`;
-    if (!s.research.includes('ops_center') && !s.staff.some((e) => e.role === 'manager') && p >= 2_000) return 'Tired of micromanaging? Research Operations Center or hire a manager to enable house rules.';
+    if (n === 1) return 'Your stand runs itself now. Open a second restaurant: walk to a 売物件 For Sale sign or press Tab.';
+    const need = empireAlerts(s).filter((a) => a.severity !== 'opportunity').reduce((a, x) => a + Math.max(1, x.restIds.length), 0);
+    if (need) return `Check the Empire ledger (Tab): ${need} restaurant${need === 1 ? ' needs' : 's need'} attention.`;
+    if (!s.research.includes('ops_center') && Object.keys(s.restaurants).some((id) => !sim.hasManager(s, id)) && p >= 2_000) return 'Hire a manager to unlock house rules (auto-hire, smart pricing).';
     for (const a of Object.values(AREAS))
-      if (!s.districts.includes(a.id) && p >= a.unlock.pieces && s.cash >= a.unlock.cost && (!a.unlock.chapter2 || s.flags.chapter2)) return `New market: ${a.name} is ready to unlock. Tab → Empire map`;
+      if (!s.districts.includes(a.id) && p >= a.unlock.pieces && s.cash >= a.unlock.cost && (!a.unlock.chapter2 || s.flags.chapter2)) return `New market open: ${a.name}. Expand from the Empire ledger.`;
     if (s.flags.chapter2 && !s.flags.seenChapter2Hint) return 'Chapter 2: franchises, cities and HQ in Tab → Empire';
     return goal;
   }

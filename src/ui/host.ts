@@ -27,6 +27,8 @@ export interface UIHost {
   setPaused(p: boolean): void;
   /** Tycoon time speed: 1, 2 or 4 (sim + NPCs run faster). Pause is separate (setPaused). Keys 1/2/3 also set it. */
   speed: number;
+  /** True while the pause menu or the ⏸ control has stopped the simulation. */
+  paused: boolean;
   setSpeed(n: 1 | 2 | 4): void;
   /** Visible customer orders at the restaurant the player is in (HUD ticket rail). */
   ordersAtCurrentSite(): OrderView[];

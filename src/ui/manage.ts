@@ -4,51 +4,46 @@ import { audio } from '../audio/audio';
 import * as A from '../core/actions';
 import {
   CAMPAIGNS, CITIES, CITY_IDS, DAY_SECONDS, DISTRICTS, DISTRICT_IDS, DistrictId, FACILITIES, FacilityId, HQ_MAX, INGREDIENTS,
-  INGREDIENT_IDS, IngredientId, MAX_SKILL, PROPERTIES, PROPERTY_IDS, RECIPES, RESEARCH, RIVALS, ROLES, Role, UPGRADES,
-  hqCost, milestone, recipeCost, trainCost,
+  INGREDIENT_IDS, IngredientId, MAX_SKILL, PROPERTIES, RECIPES, RESEARCH, RIVALS, ROLES,
+  hqCost, milestone, trainCost,
 } from '../core/data';
 import { clockStr, duration, exact, short, yen, yenExact } from '../core/format';
 import * as sim from '../core/sim';
 import { on } from '../core/bus';
-import { ACHIEVEMENTS, AchCategory, isUnlocked, rewardText, unlockedCosmetics } from '../core/achievements';
+import { ACHIEVEMENTS, AchCategory, isUnlocked, rewardText } from '../core/achievements';
 import { CLIENTS, MAX_ACTIVE, acceptContract, contracts } from '../core/contracts';
 import { claimQuest, streakBonus, STREAK_CAP } from '../core/quests';
-import { averageStars } from '../core/reviews';
-import { SEASONAL_RECIPES, season, seasonalRecipes } from '../core/seasons';
-import { bar, delegate, el, esc, fail, ingIcon, patch, pips, run, stars } from './dom';
+import { bar, delegate, el, esc, fail, ingIcon, patch, run, stars } from './dom';
 import { ledgerHtml, statsPanel } from './stats';
 import { UIHost } from './host';
 
+// The Daichō dashboard is built in parallel (src/ui/daicho/); eager glob keeps this compiling if it's absent.
+type DaichoT = new (host: UIHost, nav: { openRestaurant(id: string): void; buyLot(propId: string): void }) => { el: HTMLElement; update(dt: number): void; destroy(): void };
+// Lazy + error-tolerant: a half-built daicho/ must never break the rest of the game; the fallback list is shown instead.
+const daichoLoader = Object.values(import.meta.glob('./daicho/daicho.ts'))[0] as (() => Promise<{ Daicho?: DaichoT }>) | undefined;
+let DaichoCtor: DaichoT | null = null, daichoTried = false;
+function loadDaicho(then: () => void): void {
+  if (daichoTried || !daichoLoader) return;
+  daichoTried = true;
+  daichoLoader().then((m) => { DaichoCtor = m.Daicho ?? null; then(); }).catch((e) => console.warn('Daichō unavailable, using fallback', e));
+}
+
 export const TABS = [
-  ['restaurants', '店', 'Restaurants'], ['staff', '人', 'Staff'], ['inventory', '蔵', 'Inventory'], ['marketing', '宣', 'Marketing'],
-  ['research', '研', 'Research'], ['expansion', '出', 'Expansion'], ['empire', '帝', 'Empire'], ['finances', '金', 'Finances'], ['stats', '統', 'Statistics'],
+  ['daicho', '帳', 'Empire'], ['staff', '人', 'Staff pool'], ['inventory', '蔵', 'Inventory'], ['marketing', '宣', 'Marketing'],
+  ['research', '研', 'Research'], ['empire', '世', 'World'], ['finances', '金', 'Finances'], ['stats', '統', 'Statistics'],
   ['quests', '依', 'Quests'], ['catering', '宴', 'Catering'], ['awards', '賞', 'Awards'],
 ] as const;
 export type Tab = (typeof TABS)[number][0];
 
-const THEMES = ['Classic Wood', 'Sakura Pink', 'Midnight Neon', 'Imperial Gold'];
-/** Achievement cosmetics that map onto existing restaurant fields. Others are keepsakes (shown, not applied). */
-const COSMETICS: Record<string, { name: string; apply?: { signColor?: string; theme?: number; uniform?: string }; swatch: string }> = {
-  sign_gold: { name: 'Gold sign', apply: { signColor: '#c99a3c' }, swatch: '#c99a3c' },
-  sign_gold_star: { name: 'Gold-star sign', apply: { signColor: '#ffd23f' }, swatch: '#ffd23f' },
-  sign_neon_pink: { name: 'Neon pink sign', apply: { signColor: '#ff3e9a' }, swatch: '#ff3e9a' },
-  sign_neon_red: { name: 'Neon red sign', apply: { signColor: '#ff2a2a' }, swatch: '#ff2a2a' },
-  sign_neon_rainbow: { name: 'Neon violet sign', apply: { signColor: '#7b5cff' }, swatch: 'linear-gradient(90deg,#ff3e9a,#ffd23f,#3fa7ff,#7b5cff)' },
-  sign_diamond: { name: 'Diamond sign', apply: { signColor: '#9fe8ff' }, swatch: '#9fe8ff' },
-  sign_laurel: { name: 'Laurel sign', apply: { signColor: '#4f7a35' }, swatch: '#4f7a35' },
-  theme_gold_leaf: { name: 'Gold-leaf interior', apply: { theme: 3 }, swatch: 'linear-gradient(135deg,#f3d48a,#c99a3c)' },
-  uniform_black: { name: 'Black uniforms', apply: { uniform: '#1f1b17' }, swatch: '#1f1b17' },
-  apron_indigo: { name: 'Indigo aprons', apply: { uniform: '#23385c' }, swatch: '#23385c' },
-};
 const CAT: Record<AchCategory, string> = { quality: 'Quality 品質', speed: 'Speed 速', expansion: 'Expansion 出店', staff: 'Staff 人材', wealth: 'Wealth 富', collection: 'Collection 収集', rivals: 'Rivals 好敵手', secrets: 'Secrets 秘', million: 'Million 百万' };
 const TIER = { bronze: '銅', silver: '銀', gold: '金' } as const;
-const KIND_EMOJI = { stand: '🛖', shop: '🏠', restaurant: '🏯', flagship: '🏙️' } as const;
 
 export class Manage {
   el: HTMLElement;
   private body: HTMLElement;
   private tabsEl: HTMLElement;
-  tab: Tab = 'restaurants';
+  tab: Tab = 'daicho';
+  private dc: { el: HTMLElement; update(dt: number): void; destroy(): void } | null = null;
   private sel: string | null = null;
   private confirmFire: number | null = null;
   private hireTo: Record<number, string> = {};
@@ -56,7 +51,7 @@ export class Manage {
   private ledgerSt: { last?: string } = {};
   private refreshT = 0;
 
-  constructor(private host: UIHost, close: () => void) {
+  constructor(private host: UIHost, close: () => void, private nav: { openRestaurant(id: string): void; buyLot(propId: string): void }) {
     this.el = el('div', 'modal manage');
     this.el.innerHTML = `<div class="panel"><div class="modal-head"><h2><span id="mg-co"></span> <span class="ja">経営帳</span></h2>
       <span class="chip gold" id="mg-cash"></span><button class="x" aria-label="Close">✕</button></div>
@@ -78,6 +73,7 @@ export class Manage {
   private get s() { return this.host.s; }
 
   show(tab?: Tab): void {
+    if (tab && tab !== this.tab && this.tab === 'daicho') this.leave();
     if (tab) this.tab = tab;
     this.sel = this.sel && this.s.restaurants[this.sel] ? this.sel : this.host.currentSite() ?? Object.keys(this.s.restaurants)[0];
     this.tabsEl.querySelectorAll<HTMLElement>('.tab').forEach((b) => {
@@ -89,7 +85,11 @@ export class Manage {
     this.render();
   }
 
+  /** Called when the window closes or the tab changes away from the dashboard. */
+  leave(): void { this.dc?.destroy(); this.dc = null; if (this.st.last === '#daicho') this.st.last = undefined; }
+
   update(dt: number): void {
+    this.dc?.update(dt);
     this.refreshT += dt;
     if (this.refreshT < 0.5) return;
     this.refreshT = 0;
@@ -100,6 +100,15 @@ export class Manage {
     const s = this.s;
     (this.el.querySelector('#mg-co') as HTMLElement).textContent = s.player.company;
     (this.el.querySelector('#mg-cash') as HTMLElement).textContent = `¥ ${exact(s.cash)}`;
+    if (this.tab === 'daicho' && !DaichoCtor) loadDaicho(() => { this.st.last = undefined; if (this.tab === 'daicho') this.render(); });
+    (this.el.querySelector('.tab-body') as HTMLElement).classList.toggle('dc-host', this.tab === 'daicho' && !!DaichoCtor);
+    if (this.tab === 'daicho' && DaichoCtor) {
+      if (this.st.last !== '#daicho') {
+        this.dc = new DaichoCtor(this.host, { openRestaurant: (id: string) => this.nav.openRestaurant(id), buyLot: (id: string) => this.nav.buyLot(id) });
+        this.body.replaceChildren(this.dc!.el); this.st.last = '#daicho';
+      }
+      return;
+    }
     if (this.tab === 'stats') {
       if (this.st.last !== '#stats') { this.body.replaceChildren(statsPanel(s)); this.st.last = '#stats'; this.ledgerSt.last = undefined; }
       else { const lg = this.body.querySelector<HTMLElement>('.ledger'); if (lg) patch(lg, ledgerHtml(s), this.ledgerSt); }
@@ -112,24 +121,16 @@ export class Manage {
   // ------------------------------------------------------------ wiring
   private wire(): void {
     const s = () => this.s;
-    const refreshSoon = (() => { let t = 0; return () => { clearTimeout(t); t = window.setTimeout(() => this.host.refreshWorld(), 350); }; })();
     const after = () => { this.st.last = undefined; this.render(); };
     delegate(this.body, {
-      sel: (id) => { this.sel = id; this.tab = 'restaurants'; audio.sfx('click'); this.show(); },
-      menu: (r, b) => { if (run(b, A.toggleMenu(s(), this.sel!, r), 'pop')) after(); },
-      upg: (u, b) => { if (run(b, A.buyUpgrade(s(), this.sel!, u), 'upgrade')) after(); },
+      sel: (id) => { audio.sfx('click'); this.nav.openRestaurant(id); },
+      lot: (id) => { audio.sfx('click'); this.nav.buyLot(id); },
       tab: (t) => this.show(t as Tab),
       claim: (id, b) => { if (run(b, claimQuest(s().quests, s(), id), 'coin')) after(); },
       accept: (id, b) => {
         const res = acceptContract(s(), Number(id));
         if (typeof res === 'string') return fail(b, res);
         audio.sfx('fanfare'); after();
-      },
-      cos: (id) => {
-        const c = COSMETICS[id], r = s().restaurants[this.sel!];
-        if (!c?.apply || !unlockedCosmetics(s()).includes(id)) return;
-        Object.assign(r, c.apply);
-        this.host.refreshWorld(); audio.sfx('pop'); after();
       },
       hire: (id, b) => {
         const to = this.hireTo[Number(id)] ?? '';
@@ -158,112 +159,15 @@ export class Manage {
       res: (id, b) => { if (run(b, A.doResearch(s(), id), 'upgrade')) after(); },
       unlock: (d, b) => { if (run(b, A.unlockDistrict(s(), d as DistrictId), 'fanfare')) after(); },
       travel: (d) => { this.host.travel(d as DistrictId); (this.el.querySelector('.x') as HTMLElement).click(); },
-      prop: (id, b) => { if (run(b, A.buyProperty(s(), id), 'fanfare')) after(); },
       city: (id, b) => { if (run(b, A.openCity(s(), id), 'fanfare')) after(); },
       fran: (id, b) => { if (run(b, A.buyFranchise(s(), id), 'coin')) after(); },
       hq: (_, b) => { if (run(b, A.buyHQ(s()), 'fanfare')) after(); },
       fac: (id, b) => { if (run(b, A.buyFacility(s(), id as FacilityId), 'upgrade')) after(); },
       buyout: (arg, b) => { const [rid, d] = arg.split(':'); if (run(b, A.buyout(s(), rid, d as DistrictId), 'fanfare')) after(); },
     }, {
-      price: (v, e) => {
-        A.setPrice(s(), this.sel!, Number(v));
-        e.setAttribute('aria-valuetext', `price ×${Number(v).toFixed(2)}`);
-        const lbl = this.body.querySelector('#price-lbl'); if (lbl) lbl.innerHTML = this.priceLabel();
-      },
-      rname: (v) => { const r = s().restaurants[this.sel!]; r.name = v.slice(0, 30) || PROPERTIES[r.id].name; refreshSoon(); },
-      sign: (v) => { s().restaurants[this.sel!].signColor = v; refreshSoon(); },
-      uniform: (v) => { s().restaurants[this.sel!].uniform = v; refreshSoon(); },
-      theme: (v) => { s().restaurants[this.sel!].theme = Number(v); this.host.refreshWorld(); audio.sfx('pop'); after(); },
       hireto: (v, e) => { this.hireTo[Number(e.dataset.id)] = v; },
       assign: (v, e) => { const err = A.assign(s(), Number(e.dataset.id), v || null); if (err) fail(e, err); else audio.sfx('pop'); after(); },
     });
-  }
-
-  // ------------------------------------------------------------ restaurants
-  private priceLabel(): string {
-    const r = this.s.restaurants[this.sel!], d = AREAS[PROPERTIES[r.id].district];
-    const dem = sim.priceDemand(r.priceMult, d.elasticity);
-    return `Price ×${r.priceMult.toFixed(2)} → demand <b class="${dem >= 1 ? 'good' : 'bad'}">${Math.round(dem * 100)}%</b> of normal · ${d.name} guests are ${d.elasticity < 1 ? 'not very' : d.elasticity > 1.4 ? 'very' : 'fairly'} price-sensitive`;
-  }
-
-  r_restaurants(): string {
-    const s = this.s;
-    const ids = Object.keys(s.restaurants);
-    const id = this.sel!, r = s.restaurants[id], p = PROPERTIES[id];
-    const m = sim.mods(s);
-    const auto = sim.isAutomated(s, id);
-    const chips = `<div class="row wrap">${ids.map((x) => `<button class="opt ${x === id ? 'on' : ''}" data-act="sel" data-arg="${x}">${KIND_EMOJI[PROPERTIES[x].kind]} ${esc(s.restaurants[x].name)}</button>`).join('')}</div>`;
-    const stats = `<div class="statgrid section">
-      <div class="stat"><div class="k">Reputation</div><div class="v">${stars(r.reputation)} <span class="small">${r.reputation.toFixed(1)}</span></div></div>
-      <div class="stat"><div class="k">Satisfaction</div><div class="v">${Math.round(r.satisfaction * 100)}%</div></div>
-      <div class="stat"><div class="k">Cleanliness</div><div class="v ${r.cleanliness < 0.5 ? 'bad' : ''}">${Math.round(r.cleanliness * 100)}%</div></div>
-      <div class="stat"><div class="k">Demand now</div><div class="v">${sim.demandPerMin(s, id).toFixed(1)} <span class="small">guests/min</span></div></div>
-      <div class="stat"><div class="k">Kitchen</div><div class="v">${sim.kitchenRate(s, id).toFixed(2)} <span class="small">pcs/s</span></div></div>
-      <div class="stat"><div class="k">Open orders</div><div class="v">${r.orders.length} <span class="small">/ ${r.ready.length} ready</span></div></div>
-      <div class="stat"><div class="k">Guests served</div><div class="v">${short(r.served)}</div></div>
-      <div class="stat"><div class="k">Revenue</div><div class="v">${yen(r.revenue)}</div></div>
-    </div>`;
-    const inSeason = seasonalRecipes(s);
-    const menuCard = (rc: (typeof RECIPES)[string], tag = '') => {
-      const on = r.menu.includes(rc.id);
-      const price = rc.price * r.priceMult, cost = recipeCost(rc, m.ingredientCost);
-      return `<button class="card ${on ? 'on' : ''} ${tag}" style="text-align:left;cursor:pointer" data-act="menu" data-arg="${rc.id}" aria-pressed="${on}">
-        <div class="spread"><b>${esc(rc.name)}</b><span class="tick">${on ? '✓' : ''}</span></div>
-        <div class="tiny muted">${rc.jp} · ${Object.keys(rc.ingredients).map((k) => ingIcon(k)).join('')}</div>
-        <div class="small">${yen(price)}/pc · cost ${yen(cost)} · <span class="good">+${yen(price - cost)}</span></div></button>`;
-    };
-    const se = season(s);
-    const limited = Object.values(SEASONAL_RECIPES).map((rc) => inSeason.includes(rc.id) ? menuCard(RECIPES[rc.id], 'limited')
-      : `<div class="card locked small"><b>${esc(rc.name)}</b><div class="tiny">${rc.jp} · out of season${r.menu.includes(rc.id) ? ' · paused on your menu' : ''}</div></div>`).join('');
-    const menu = Object.values(RECIPES).filter((rc) => !(rc.id in SEASONAL_RECIPES)).map((rc) => {
-      if (s.recipes.includes(rc.id)) return menuCard(rc);
-      const res = Object.values(RESEARCH).find((x) => x.unlockRecipe === rc.id);
-      return `<div class="card locked small"><b>🔒 ${esc(rc.name)}</b><div class="tiny">${res ? `Research: ${res.name}` : 'Milestone reward'}</div></div>`;
-    }).join('');
-    // reviews (Tabelog-style)
-    const rv = s.reviews?.[id] ?? [];
-    const avg = averageStars(rv);
-    const reviews = `<div class="section"><h3>Reviews 口コミ</h3><div class="reviews">
-      <div class="score"><div class="num">${rv.length ? avg.toFixed(2) : '—'}</div>${stars(avg)}<div class="tiny muted">${rv.length} review${rv.length === 1 ? '' : 's'}</div></div>
-      <div class="rv-list">${rv.length ? rv.slice(0, 4).map((x) => `<div class="rv"><div class="spread"><b>${esc(x.author)}</b><span>${stars(x.stars)} <span class="tiny muted">Day ${x.day}</span></span></div><p>${esc(x.text)}</p></div>`).join('')
-        : '<div class="muted small">No reviews yet. Serve a few happy guests and the food bloggers will come.</div>'}</div></div></div>`;
-    // achievement cosmetics
-    const owned = unlockedCosmetics(s);
-    const extras = Object.entries(COSMETICS).map(([cid, c]) => owned.includes(cid)
-      ? `<button class="cos" data-act="cos" data-arg="${cid}" title="Apply: ${esc(c.name)}"><i style="background:${c.swatch}"></i>${esc(c.name)}</button>`
-      : `<span class="cos locked" title="Unlock through an achievement"><i></i>???</span>`).join('');
-    const keepsakes = owned.filter((x) => !COSMETICS[x]);
-    const upg = Object.values(UPGRADES).map((u) => {
-      const lvl = r.upgrades[u.id] ?? 0, mx = A.upgradeMax(id, u.id), maxed = lvl >= mx;
-      const cost = A.upgradePrice(s, id, u.id);
-      return `<div class="card upg ${maxed ? 'done' : ''}"><div class="spread"><span class="em">${u.emoji}</span>${pips(lvl, mx)}</div>
-        <b>${u.name}</b><div class="tiny muted">${u.desc}</div><div style="flex:1"></div>
-        ${maxed ? `<button class="btn small" disabled>MAX</button>` : `<button class="btn small ${s.cash >= cost ? '' : 'poor'}" data-act="upg" data-arg="${u.id}">Upgrade ${yen(cost)}</button>`}</div>`;
-    }).join('');
-    const roles = (Object.keys(ROLES) as Role[]).map((ro) => {
-      const st = sim.staffAt(s, id, ro);
-      return `<div class="card small"><b>${ROLES[ro].emoji} ${ROLES[ro].name}</b> <span class="chip">${st.length}/${sim.slotsFor(s, id, ro)}</span>
-        <div class="tiny muted">${st.map((e) => esc(e.name) + ' ★' + e.skill).join(', ') || 'Nobody yet'}</div></div>`;
-    }).join('');
-    return `${chips}
-      <div class="section spread"><div><h2>${esc(r.name)}</h2><div class="muted">${AREAS[p.district].name} · ${p.kind} · rent ${yen(p.rent)}/day · ${p.seatsMax} seats max</div></div>
-        <span class="chip ${auto ? 'green' : 'red'}">${auto ? '⚙️ Fully automated' : s.lifetime.pieces < 50 ? '🧑‍🍳 You run this stand' : '🧑‍🍳 Needs you (hire chef + server)'}</span></div>
-      ${stats}
-      <div class="section"><h3>💴 Pricing</h3><div class="card"><input type="range" min="0.6" max="2.5" step="0.05" value="${r.priceMult}" data-in="price" aria-label="Price multiplier" aria-valuetext="price ×${r.priceMult.toFixed(2)}">
-        <div class="small" id="price-lbl">${this.priceLabel()}</div></div></div>
-      <div class="section"><h3>📜 Menu <span class="tiny muted">click to toggle</span></h3><div class="grid g4">${menu}</div></div>
-      <div class="section"><h3>Limited 限定 <span class="tiny muted">${se.emoji} ${se.name} specials — on the menu only while in season</span></h3><div class="grid g4">${limited}</div></div>
-      ${reviews}
-      <div class="section"><h3>🛠️ Upgrades</h3><div class="grid g3">${upg}</div></div>
-      <div class="section"><h3>👥 Staff <button class="btn small blue" data-act="tab" data-arg="staff">Hire / manage</button></h3><div class="grid g4">${roles}</div></div>
-      <div class="section"><h3>🎨 Customize</h3><div class="card row wrap" style="gap:16px">
-        <label class="field">Restaurant name<input type="text" maxlength="30" value="${esc(r.name)}" data-in="rname"></label>
-        <label class="field">Sign color<input type="color" value="${r.signColor}" data-in="sign"></label>
-        <label class="field">Uniforms<input type="color" value="${r.uniform}" data-in="uniform"></label>
-        <label class="field">Interior theme<select data-in="theme">${THEMES.map((t, i) => `<option value="${i}" ${r.theme === i ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
-      </div>
-      <div class="card section"><b>Unlocked extras</b> <span class="tiny muted">earned from achievements — click to apply here</span><div class="cos-row">${extras}</div>
-        ${keepsakes.length ? `<div class="tiny muted" style="margin-top:6px">Also collected: ${keepsakes.map((k) => esc(k.replace(/_/g, ' '))).join(', ')}</div>` : ''}</div></div>`;
   }
 
   // ------------------------------------------------------------ staff
@@ -366,25 +270,18 @@ export class Manage {
       <div style="overflow-x:auto" class="section"><div class="research-cols">${cols}</div></div>`;
   }
 
-  // ------------------------------------------------------------ expansion
-  r_expansion(): string {
+  // ------------------------------------------------------------ dashboard fallback (until the Daichō module loads)
+  r_daicho(): string {
     const s = this.s;
-    const dists = DISTRICT_IDS.map((d) => {
-      const def = DISTRICTS[d], open = s.districts.includes(d), here = s.player.district === d;
-      const props = PROPERTY_IDS.filter((p) => PROPERTIES[p].district === d).map((pid) => {
-        const p = PROPERTIES[pid], owned = !!s.restaurants[pid];
-        return `<div class="card ${owned ? 'done' : ''} small"><div class="spread"><b>${KIND_EMOJI[p.kind]} ${esc(owned ? s.restaurants[pid].name : p.name)}</b><span class="tag">${p.kind}</span></div>
-          <div class="tiny muted">Traffic ×${p.size} · ${p.seatsMax} seats · ${p.chefSlots} chefs · rent ${yen(p.rent)}/day</div>
-          ${owned ? `<button class="btn small blue" style="margin-top:4px" data-act="sel" data-arg="${pid}">Manage</button>` : `<button class="btn small ${open && s.cash >= p.price ? '' : 'poor'}" style="margin-top:4px" data-act="prop" data-arg="${pid}" ${open ? '' : 'disabled'}>Buy ${yen(p.price)}</button>`}</div>`;
-      }).join('');
-      return `<div class="card ${open ? '' : 'locked'}"><div class="spread"><h3>${def.jp} ${def.name} ${here ? '<span class="chip red">📍 You are here</span>' : ''}</h3>
-        ${open ? (here ? '' : `<button class="btn small blue" data-act="travel" data-arg="${d}">🚇 Travel</button>`) : `<button class="btn small gold" data-act="unlock" data-arg="${d}">Unlock ${yen(def.unlock.cost)}</button>`}</div>
-        <div class="small muted">${def.blurb}</div>
-        ${open ? '' : `<div class="small">Requires ${exact(def.unlock.pieces)} pieces sold (${exact(Math.min(s.lifetime.pieces, def.unlock.pieces))}) + business permit ${yen(def.unlock.cost)}</div>`}
-        <div class="tiny" style="margin:4px 0">Base traffic ${def.traffic}/min · price sensitivity ${def.elasticity}</div>
-        <div class="grid g2">${props}</div></div>`;
+    const rest = Object.values(s.restaurants).map((r) => `<button class="card" style="text-align:left;cursor:pointer" data-act="sel" data-arg="${r.id}">
+      <div class="spread"><b>${esc(r.name)}</b><span class="tag">${r.concept}</span></div><div class="tiny muted">${esc(AREAS[PROPERTIES[r.id].district].name)} · today ${yen(r.day.rev)} · ${stars(r.reputation)}</div></button>`).join('');
+    const areas = Object.values(AREAS).map((a) => {
+      const open = s.districts.includes(a.id);
+      const lots = Object.values(PROPERTIES).filter((p) => p.district === a.id && !s.restaurants[p.id]).map((p) => `<button class="btn small ghost" data-act="lot" data-arg="${p.id}">${esc(p.name)} · ${yen(p.price)}</button>`).join(' ');
+      return `<div class="card ${open ? '' : 'locked'} small"><div class="spread"><b>${a.jp} ${esc(a.name)}</b>${open ? '' : `<button class="btn small gold" data-act="unlock" data-arg="${a.id}">Unlock ${yen(a.unlock.cost)}</button>`}</div>
+        ${open ? `<div class="row wrap" style="margin-top:6px">${lots || '<span class="muted">Every lot here is yours.</span>'}</div>` : `<div class="tiny">${exact(a.unlock.pieces)} pieces · ${esc(a.blurb)}</div>`}</div>`;
     }).join('');
-    return `<h2>🗾 Expansion</h2><div class="muted small">Unlock districts, buy new locations and grow across Tokyo. Each restaurant needs its own staff to run without you.</div><div class="grid g2 section">${dists}</div>`;
+    return `<h2>Empire 帳</h2><div class="grid g3">${rest}</div><div class="section"><h3>Areas & lots</h3><div class="grid g2">${areas}</div></div>`;
   }
 
   // ------------------------------------------------------------ empire

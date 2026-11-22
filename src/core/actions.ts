@@ -37,7 +37,7 @@ export function buyUpgrade(s: GameState, restId: string, upgId: string): Result 
   return null;
 }
 
-export function hire(s: GameState, candidateId: number, restId: string | null): Result {
+export function hire(s: GameState, candidateId: number, restId: string | null, quiet = false): Result {
   const c = s.candidates.find((e) => e.id === candidateId);
   if (!c) return 'Candidate no longer available';
   if (s.lifetime.pieces < ROLES[c.role].unlockPieces) return `Unlocks at ${ROLES[c.role].unlockPieces} pieces sold`;
@@ -48,7 +48,7 @@ export function hire(s: GameState, candidateId: number, restId: string | null): 
   c.restaurant = restId;
   s.staff.push(c);
   emit('hire', { role: c.role });
-  toast(`${ROLES[c.role].emoji} Hired ${c.name}!`, 'good');
+  if (!quiet) toast(`${ROLES[c.role].emoji} Hired ${c.name}!`, 'good');
   changed();
   return null;
 }

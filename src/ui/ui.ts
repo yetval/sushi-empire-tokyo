@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { audio } from '../audio/audio';
 import { on, toast } from '../core/bus';
 import * as A from '../core/actions';
-import { DISTRICTS, DISTRICT_IDS, DistrictId, EVENTS, INGREDIENTS, INGREDIENT_IDS, IngredientId, PROPERTIES, RECIPES, milestone } from '../core/data';
+import { CONCEPTS, ConceptId, DISTRICTS, DISTRICT_IDS, DistrictId, EVENTS, INGREDIENTS, INGREDIENT_IDS, IngredientId, PROPERTIES, RECIPES, milestone } from '../core/data';
 import { clockStr, duration, exact, short, yen, yenExact } from '../core/format';
 import * as sim from '../core/sim';
 import { Ticket } from '../core/state';
@@ -19,6 +19,8 @@ import { Creator, makeCreator } from './creator';
 import { bar, delegate, el, esc, fail, ingIcon, patch, run, stars } from './dom';
 import { UIHost } from './host';
 import { Manage, Tab } from './manage';
+import { Sheet, SheetTab, conceptCards } from './sheet';
+import * as E from '../core/empire';
 
 interface Modal { kind: string; el: HTMLElement; onClose: () => void; update?: (dt: number) => void; prev?: Element | null }
 let uid = 0;
@@ -48,6 +50,8 @@ export class UI {
   private manage: Manage | null = null;
   private title: HTMLElement | null = null;
   private titleCreator: Creator | null = null;
+  private sheet: Sheet | null = null;
+  private alertT = 9;
   private iconKey = '';
   private flapStr = '';
   private questSt: { last?: string } = {};
@@ -90,7 +94,8 @@ export class UI {
       e.classList.add('open');
       // timing games and the speech panel own Space/E — focus the frame itself there, not a button
       const first = m.kind === 'cook' || m.kind === 'dialog' ? null
-        : e.querySelector<HTMLElement>('.tab[aria-current]') ?? e.querySelector<HTMLElement>('.modal-body button, .modal-body input, .modal-body select, .modal-body textarea, .tab-body button, button:not(.x), [tabindex="0"]');
+        : ['.tab[aria-current]', '.stab[aria-current]', '.modal-body button:not([disabled]), .modal-body input, .modal-body select, .modal-body textarea', '.tab-body button', 'button:not(.x)', '[tabindex="0"]']
+          .map((q) => e.querySelector<HTMLElement>(q)).find(Boolean) ?? null;
       (first ?? e).focus({ preventScroll: true });
     });
     return m;
@@ -146,6 +151,9 @@ export class UI {
       <div class="hud-tc"><div class="panel sushi-count" aria-live="off"><div class="n">${ICON.maki}<span class="row" style="gap:3px" id="h-flaps" role="img" aria-label="pieces sold"></span><span class="goal" id="h-goal"></span></div><div class="next" id="h-next"></div><div id="h-mbar"></div></div></div>
       <div class="hud-tr">
         <div class="panel clock"><div class="cal-top"><span id="h-day"></span><span class="rings"><i></i><i></i></span></div><div class="cal-body"><span class="icon" id="h-icon"></span><div><div class="t" id="h-time"></div><div class="d" id="h-open"></div></div></div><div class="cal-season" id="h-season"></div></div>
+        <div class="speed hud-click" id="h-speed" role="group" aria-label="Time speed">
+          <button data-act="spd" data-arg="0" aria-label="Pause">⏸</button><button data-act="spd" data-arg="1" aria-label="Normal speed">▶</button><button data-act="spd" data-arg="2" aria-label="Double speed">▶▶</button><button data-act="spd" data-arg="4" aria-label="Quadruple speed">▶▶▶</button></div>
+        <button class="alert-pill hud-click" id="h-alerts" hidden></button>
         <div id="h-holiday"></div>
         <div id="h-event"></div>
         <div id="h-rest"></div>
@@ -157,6 +165,15 @@ export class UI {
     this.toastBox = el('div', 'toasts');
     this.toastBox.setAttribute('role', 'status'); this.toastBox.setAttribute('aria-live', 'polite');
     this.root.append(this.toastBox); // outside the HUD so it never goes inert behind windows
+    delegate(this.q('#h-speed'), {
+      spd: (v) => {
+        const n = Number(v);
+        audio.sfx('click');
+        if (!n) { this.host.setPaused(!(this.host as unknown as { paused?: boolean }).paused); return; }
+        this.host.setPaused(false); this.host.setSpeed(n as 1 | 2 | 4);
+      },
+    });
+    this.q('#h-alerts').addEventListener('click', () => { audio.sfx('click'); this.toggleManage(Object.keys(this.host.s.restaurants).length >= 2 ? 'daicho' : undefined); });
     delegate(this.q('#h-quests'), {
       qtoggle: () => { this.questsOpen = !this.questsOpen; this.questSt.last = undefined; audio.sfx('click'); },
       claim: (id, b) => { if (run(b, claimQuest(this.host.s.quests, this.host.s, id), 'coin')) { this.questSt.last = undefined; toast('Request complete — reward collected!', 'good', '🎐'); } },
@@ -291,6 +308,22 @@ export class UI {
     this.q('#h-season').textContent = `${se.emoji} ${se.name} ${se.jp} · ${se.dayOfSeason}/7`;
     this.q('#h-holiday').innerHTML = hol ? `<div class="holiday-chip" title="${esc(hol.desc)}"><b>${hol.jp}</b> ${hol.emoji} ${esc(hol.name)}</div>` : '';
     patch(this.q('#h-quests'), this.questsHtml(), this.questSt);
+    // speed hanko
+    const paused = !!(this.host as unknown as { paused?: boolean }).paused;
+    this.q('#h-speed').querySelectorAll<HTMLElement>('button').forEach((b) => {
+      const n = Number(b.dataset.arg), on = n === 0 ? paused : !paused && this.host.speed === n;
+      b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on));
+    });
+    // alert pill (alerts() scans every restaurant, so ~1 Hz)
+    if ((this.alertT += 0.25) >= 1) {
+      this.alertT = 0;
+      const al = E.alerts(s), crit = al.filter((a) => a.severity === 'critical').length, warn = al.filter((a) => a.severity === 'warning').length;
+      const pill = this.q('#h-alerts');
+      pill.hidden = !(crit + warn) || s.tutorial < 6;
+      pill.className = `alert-pill hud-click ${crit ? 'crit' : 'warn'}`;
+      pill.innerHTML = `<b>${crit ? '急' : '注'}</b>${crit + warn} ${crit + warn === 1 ? 'issue' : 'issues'}${crit ? ` · ${crit} urgent` : ''}`;
+      pill.setAttribute('aria-label', `${crit + warn} business issues${crit ? `, ${crit} urgent` : ''}. Open management.`);
+    }
     const ev = s.event ? EVENTS[s.event.id] : null;
     this.q('#h-event').innerHTML = ev ? `<div class="event-chip" title="${esc(ev.desc)}">${ev.emoji} ${ev.name}<div class="tiny" style="opacity:.8;font-weight:500">${esc(ev.desc)}</div></div>` : '';
     // restaurant card
@@ -399,17 +432,37 @@ export class UI {
   // ================================================================ management
   toggleManage(tab?: string): void {
     const open = this.has('manage');
+    // owner-first: one restaurant → its sheet; an empire → the ledger dashboard
+    if (!tab && !open && Object.keys(this.host.s.restaurants).length < 2) {
+      if (this.has('sheet')) { this.closeTop(); return; }
+      this.openRestaurant(this.host.currentSite() ?? Object.keys(this.host.s.restaurants)[0]);
+      return;
+    }
     if (open && (!tab || this.manage!.tab === tab)) { this.remove(open); return; }
     if (!this.manage) {
       let m!: Modal;
-      this.manage = new Manage(this.host, () => this.remove(m));
-      m = { kind: 'manage', el: this.manage.el, onClose: () => {}, update: (dt) => this.manage!.update(dt) };
+      this.manage = new Manage(this.host, () => this.remove(m), { openRestaurant: (id) => this.openRestaurant(id), buyLot: (id) => this.openProperty(id) });
+      m = { kind: 'manage', el: this.manage.el, onClose: () => this.manage!.leave(), update: (dt) => this.manage!.update(dt) };
       (this.manage as any)._modal = m;
     }
     const m = (this.manage as any)._modal as Modal;
-    this.manage.show((tab as Tab) || undefined);
+    this.manage.show((tab as Tab) || (Object.keys(this.host.s.restaurants).length >= 2 ? 'daicho' : undefined));
     if (!open) { audio.sfx('whoosh'); this.push(m); }
   }
+
+  /** Restaurant altitude: the side sheet for one location. */
+  openRestaurant(id: string, tab?: SheetTab): void {
+    if (!this.host.s.restaurants[id]) return;
+    const open = this.has('sheet');
+    if (open) { this.sheet!.setRestaurant(id, tab); return; }
+    let m!: Modal;
+    this.sheet = new Sheet(this.host, id, () => this.remove(m));
+    if (tab) this.sheet.show(tab);
+    m = { kind: 'sheet', el: this.sheet.el, onClose: () => { this.sheet = null; }, update: (dt) => this.sheet?.update(dt) };
+    audio.sfx('whoosh');
+    this.push(m);
+  }
+
 
   // ================================================================ supplier shop
   openShop(): void {
@@ -533,28 +586,43 @@ export class UI {
   }
 
   // ================================================================ property dialog
+  /** Buy-lot dialog with a format picker. Used by For-Sale signs in the street and the empire ledger. */
   openProperty(propId: string): void {
     if (this.has('prop')) return;
-    const p = PROPERTIES[propId], s = this.host.s, d = AREAS[p.district];
-    const { m, body } = this.window('prop', `🏷️ For Sale: ${esc(p.name)}`, 560);
-    const open = s.districts.includes(p.district);
-    body.innerHTML = `<div class="row" style="gap:14px"><div style="font-size:64px">${{ stand: '🛖', shop: '🏠', restaurant: '🏯', flagship: '🏙️' }[p.kind]}</div>
-      <div><h3>${esc(p.name)}</h3><div class="muted">${d.jp} ${d.name} · ${p.kind}</div></div></div>
-      <table class="kv section"><tr><td>💴 Price</td><td>${yenExact(p.price)}</td></tr><tr><td>🏠 Rent</td><td>${yenExact(p.rent)} / day</td></tr>
-        <tr><td>🚶 Foot traffic</td><td>×${p.size}</td></tr><tr><td>🪑 Max seats</td><td>${p.seatsMax}</td></tr>
-        <tr><td>👨‍🍳 Chef slots</td><td>${p.chefSlots}</td></tr><tr><td>🧑‍💼 Server slots</td><td>${p.serverSlots}</td></tr></table>
-      <p class="small muted">A new location needs a chef and a server to run while you're away. Bigger places attract far more guests.</p>
-      <div class="row" style="justify-content:flex-end"><button class="btn ghost" data-act="close">Not now</button>
-        <button class="btn big ${open && s.cash >= p.price ? 'green' : ''}" data-act="buy">${open ? `Buy for ${yen(p.price)}` : `Unlock ${d.name} first`}</button></div>`;
+    const p = PROPERTIES[propId], d = AREAS[p.district];
+    if (this.host.s.restaurants[propId]) { this.openRestaurant(propId); return; }
+    const { m, body } = this.window('prop', `売物件 For sale · ${esc(p.name)}`, 1080);
+    let pick: ConceptId = p.kind === 'stand' ? 'stand' : 'bar';
+    const st: { last?: string } = {};
+    const render = () => {
+      const s = this.host.s, open = s.districts.includes(p.district);
+      const why = A.conceptAllowed(s, propId, pick);
+      const total = p.price + A.fitoutCost(propId, pick);
+      const c = CONCEPTS[pick];
+      patch(body, `<div class="lot-head">
+          <div class="lot-tag"><b>${esc(p.name)}</b><span>${d.jp} ${esc(d.name)} · ${p.kind}</span></div>
+          <dl class="lot-facts"><div><dt>Lot</dt><dd>${yen(p.price)}</dd></div><div><dt>Base rent</dt><dd>${yen(p.rent)}/day</dd></div><div><dt>Foot traffic</dt><dd>×${p.size}</dd></div>
+            <div><dt>Seats</dt><dd>${p.seatsMax}</dd></div><div><dt>Chef slots</dt><dd>${p.chefSlots}</dd></div><div><dt>Area guests</dt><dd>${d.traffic}/min</dd></div></dl></div>
+        ${open ? '' : `<div class="slip warning"><span class="sev">鍵</span><span class="txt">${esc(d.name)} is not open to you yet: ${exact(d.unlock.pieces)} pieces sold and a ${yen(d.unlock.cost)} permit.</span><button class="btn small gold" data-act="unlock">Unlock ${yen(d.unlock.cost)}</button></div>`}
+        <h3 class="section">Choose a format 業態</h3><div class="concepts">${conceptCards(s, propId, pick, 'buy')}</div>
+        <div class="buybar"><span>Open a <b>${c.name}</b> here: <b>${yen(total)}</b> now, then about <b>${yen(Math.round(p.rent * c.rent))}</b>/day rent plus staff.</span>
+          <button class="btn ghost" data-act="close">Not now</button>
+          <button class="btn big" data-act="buy" ${!open || why ? 'disabled' : ''}>${!open ? 'Area locked' : why ? esc(why) : s.cash < total ? `Need ${yen(total)}` : 'Sign the lease 契約'}</button></div>`, st);
+    };
     delegate(body, {
       close: () => this.remove(m),
+      pickc: (cid) => { pick = cid as ConceptId; audio.sfx('pop'); st.last = undefined; render(); },
+      unlock: (_, b) => { if (run(b, A.unlockDistrict(this.host.s, p.district), 'fanfare')) { st.last = undefined; render(); } },
       buy: (_, b) => {
-        if (!open) return fail(b, `Unlock ${d.name} first (Tab → Expansion or the Metro map)`);
-        if (run(b, A.buyProperty(this.host.s, propId), 'fanfare')) this.remove(m);
+        if (run(b, A.buyProperty(this.host.s, propId, pick), 'fanfare')) { this.remove(m); setTimeout(() => this.openRestaurant(propId, 'staff'), 250); }
       },
     });
+    let t = 0;
+    m.update = (dt) => { if ((t += dt) > 0.5) { t = 0; render(); } };
+    render();
     this.push(m);
   }
+
 
   // ================================================================ pause
   openPause(): void {

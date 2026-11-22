@@ -116,7 +116,7 @@ export function alerts(s: GameState): Alert[] {
   const k = restaurantKPIs(s);
   const out: Alert[] = [];
   const group = (pred: (x: RestKPI) => boolean) => k.filter(pred).map((x) => x.id);
-  const playerHere = (id: string) => id === 'asakusa_stand' && s.lifetime.pieces < 200; // the starter stand is meant to be hand-run at first
+  const playerHere = (id: string) => id === 'asakusa_stand' && s.tutorial < 99; // the stand is hand-run during the tutorial
 
   const unstaffed = group((x) => !x.automated && !playerHere(x.id));
   if (unstaffed.length) {
@@ -152,11 +152,11 @@ export function alerts(s: GameState): Alert[] {
 
 // ---------------------------------------------------------------- fixes & hiring
 /** Hire the best available candidate of a role into a restaurant (creates a fresh candidate if none). */
-export function hireBest(s: GameState, restId: string, role: Role): string | null {
+export function hireBest(s: GameState, restId: string, role: Role, quiet = false): string | null {
   if (sim.staffAt(s, restId, role).length >= sim.slotsFor(s, restId, role)) return 'No free slot';
   let c = s.candidates.filter((e) => e.role === role).sort((a, b) => b.skill - a.skill)[0];
   if (!c) { c = sim.makeCandidate(s, role); s.candidates.push(c); }
-  return A.hire(s, c.id, restId);
+  return A.hire(s, c.id, restId, quiet);
 }
 
 /** Apply an alert's one-click fix. Returns an error string or null. */
@@ -168,11 +168,11 @@ export function applyFix(s: GameState, a: Alert): string | null {
     if (!s.restaurants[id]) continue;
     switch (a.fix.id) {
       case 'hireMissing':
-        if (!sim.staffAt(s, id, 'chef').length) err = hireBest(s, id, 'chef') ?? err;
-        if (sim.conceptOf(s, id).needsServer && !sim.staffAt(s, id, 'server').length && !sim.staffAt(s, id, 'manager').length) err = hireBest(s, id, 'server') ?? err;
+        if (!sim.staffAt(s, id, 'chef').length) err = hireBest(s, id, 'chef', true) ?? err;
+        if (sim.conceptOf(s, id).needsServer && !sim.staffAt(s, id, 'server').length && !sim.staffAt(s, id, 'manager').length) err = hireBest(s, id, 'server', true) ?? err;
         break;
-      case 'hireChef': err = hireBest(s, id, 'chef') ?? err; break;
-      case 'hireCleaner': err = hireBest(s, id, 'cleaner') ?? err; break;
+      case 'hireChef': err = hireBest(s, id, 'chef', true) ?? err; break;
+      case 'hireCleaner': err = hireBest(s, id, 'cleaner', true) ?? err; break;
       case 'priceUp': A.setPrice(s, id, s.restaurants[id].priceMult * 1.1); break;
       case 'priceDown': A.setPrice(s, id, s.restaurants[id].priceMult / 1.1); break;
     }
@@ -181,6 +181,7 @@ export function applyFix(s: GameState, a: Alert): string | null {
     const use = ingredientUsePerSec(s);
     for (const i of INGREDIENT_IDS) if (use[i] > 0) sim.buyIngredient(s, i, Math.ceil(use[i] * DAY_SECONDS) - s.inventory[i], true);
   }
+  if (!err) toast(`✅ ${a.fix.label}: done at ${Math.max(1, a.restIds.length)} restaurant${a.restIds.length === 1 ? '' : 's'}`, 'good');
   return err;
 }
 
@@ -223,7 +224,7 @@ function autoHire(s: GameState, id: string): void {
   if (s.restaurants[id].cleanliness < 0.7 && sim.staffAt(s, id, 'cleaner').length === 0) wants.push('cleaner');
   for (const role of wants) {
     if (!affordable(s, role)) { receipt(s, id, `Wanted a ${role} but kept a cash cushion`); continue; }
-    if (hireBest(s, id, role) === null) receipt(s, id, `Hired a ${role}`);
+    if (hireBest(s, id, role, true) === null) receipt(s, id, `Hired a ${role}`);
   }
 }
 
