@@ -60,7 +60,7 @@ export interface Employee {
   restaurant: string | null; look: Avatar;
 }
 
-export interface DaySummary { day: number; revenue: number; expenses: number; pieces: number; customers: number }
+export interface DaySummary { day: number; revenue: number; expenses: number; pieces: number; customers: number; avgStars?: number }
 
 export interface Settings {
   master: number; music: number; sfx: number; muted: boolean;

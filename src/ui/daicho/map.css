@@ -1,0 +1,105 @@
+/* Daichō map pane — washi ward map (Empire) / lot plan (City). */
+.dc-map { display: flex; flex-direction: column; gap: 6px; min-height: 0; min-width: 0; height: 100%; }
+.dc-map-head { display: flex; flex-direction: column; gap: 5px; flex: none; }
+.dc-map-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.dc-map-bc { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 14px; white-space: nowrap; overflow: hidden; }
+.dc-map-bc b { font: 400 15px var(--display); letter-spacing: .02em; overflow: hidden; text-overflow: ellipsis; }
+.dc-map-csum { font-size: 12.5px; font-weight: 700; color: var(--sumi2); }
+.dc-map-crumb { font: 700 13px var(--body); color: var(--ai); background: none; border: 0; padding: 2px 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1.5px; }
+.dc-map-crumb:hover { color: var(--sumi); }
+.dc-map .jp { font-family: var(--display); font-weight: 400; }
+
+/* region tabs + overlay segmented control share one paper-chip look */
+.dc-map-tabs, .dc-map-seg { display: flex; border: 1.5px solid var(--sumi); border-radius: 3px 5px 4px 6px / 5px 3px 6px 4px; overflow: hidden; background: #fbf6ec; flex: none; }
+.dc-map-tabs button, .dc-map-seg button { font: 700 12.5px var(--body); color: var(--sumi); background: none; border: 0; border-left: 1px solid rgba(31, 27, 23, .25); padding: 4px 10px; cursor: pointer; line-height: 1.2; }
+.dc-map-tabs button:first-child, .dc-map-seg button:first-child { border-left: 0; }
+.dc-map-tabs button:hover, .dc-map-seg button:hover { background: rgba(31, 27, 23, .07); }
+.dc-map-tabs [aria-selected='true'], .dc-map-seg [aria-pressed='true'] { background: var(--ai); color: var(--washi); }
+.dc-map-tabs .jp { font: 700 11.5px var(--body); }
+
+/* legend chip */
+.dc-map-legend { position: relative; flex: none; font-size: 12px; }
+.dc-map-legend summary { list-style: none; display: flex; align-items: center; gap: 3px; cursor: pointer; padding: 3px 8px; border: 1.5px dashed var(--sumi3); border-radius: 3px 5px 4px 6px / 5px 3px 6px 4px; background: #fbf6ec; }
+.dc-map-legend summary::-webkit-details-marker { display: none; }
+.dc-map-legend summary .marks { margin-left: 4px; font-weight: 700; letter-spacing: 1px; color: var(--sumi2); }
+.dc-map-legend[open] summary { border-style: solid; border-color: var(--sumi); }
+.dc-map-legend-p { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; width: 210px; padding: 8px 10px; display: grid; gap: 3px; background: var(--grain), #fbf6ec; border: 1.5px solid var(--sumi); border-radius: var(--edge); box-shadow: var(--lift); }
+.dc-map-legend-p div { display: flex; align-items: center; gap: 6px; }
+.dc-map-legend-p hr { border: 0; border-top: 1px dashed var(--sumi3); margin: 3px 0; width: 100%; }
+.dc-map-legend-p .sub { color: var(--sumi2); font-size: 11.5px; line-height: 1.3; margin-top: 2px; }
+.dc-map-legend-p .dc-band { width: 16px; height: 16px; font-size: 10px; }
+
+/* map surface */
+.dc-map-wrap { position: relative; flex: 1; min-height: 0; border: 1.5px solid var(--sumi); border-radius: 3px 5px 4px 6px / 5px 3px 6px 4px; background: var(--fiber), var(--grain), #f8f1e2; overflow: hidden; }
+.dc-map-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.dc-map-svg text { font-family: var(--body); font-weight: 700; text-anchor: middle; paint-order: stroke; stroke: #f8f1e2; stroke-width: .55px; stroke-linejoin: round; }
+.dc-map-svg .bg .sea { fill: #d5e1e3; }
+.dc-map-svg .bg .river { fill: none; stroke: #c3d6dc; stroke-width: 2.2; stroke-linecap: round; }
+.dc-map-svg .bg .rail { fill: none; stroke: #a9bf8f; stroke-width: .45; stroke-dasharray: 1.4 .9; }
+.dc-map-svg .bg .park { fill: #e1e6cd; }
+.dc-map-svg .bg .land { fill: #ece0c6; stroke: var(--sumi3); stroke-width: .35; }
+.dc-map-svg .bg .geo { font-size: 1.85px; fill: #5f7a84; font-weight: 500; stroke-width: .35px; letter-spacing: .05px; }
+.dc-map-svg .bg .st { stroke: #e3d6bc; stroke-width: 2.4; }
+
+/* area nodes */
+.dc-area .hit { fill: transparent; }
+.dc-area .nm { font-size: 2.1px; fill: var(--sumi); }
+.dc-area .nm .jp { font-family: var(--body); font-weight: 700; font-size: 1.9px; fill: var(--sumi2); stroke-width: .3px; }
+.dc-area .sm { font-size: 1.85px; fill: var(--sumi2); font-weight: 700; }
+.dc-area .stamp { cursor: pointer; outline: none; }
+.dc-area .stamp rect { fill: var(--ai); stroke: var(--ai2); stroke-width: .3; transition: transform .15s; transform-box: fill-box; transform-origin: center; }
+.dc-area .stamp .cnt { font: 400 2.3px var(--display); fill: var(--washi); stroke: none; }
+.dc-area.empty .stamp rect { fill: #fbf6ec; stroke: var(--ai); stroke-width: .35; stroke-dasharray: .9 .5; }
+.dc-area.empty .stamp .cnt { fill: var(--ai); }
+.dc-area .stamp:hover rect, .dc-area .stamp.is-hover rect { transform: scale(1.18) rotate(-6deg); }
+.dc-area .stamp:focus-visible rect, .dc-area.locked:focus-visible .lk { stroke: var(--shu); stroke-width: .5; stroke-dasharray: .8 .5; }
+.dc-area .more { font-size: 1.8px; fill: var(--sumi); font-weight: 800; }
+.dc-area .more.has-act { fill: var(--shu); }
+.dc-area.locked { cursor: pointer; outline: none; }
+.dc-area.locked .lk { fill: rgba(251, 246, 236, .7); stroke: var(--sumi2); stroke-width: .3; stroke-dasharray: .8 .55; }
+.dc-area.locked .lkc { font: 400 2px var(--display); fill: var(--sumi3); stroke: none; }
+.dc-area.locked .nm { fill: var(--sumi2); }
+.dc-area.locked:hover .lk { stroke: var(--sumi); fill: #fbf6ec; }
+
+/* restaurant pins: shape = concept, fill = overlay band, inner washi mark = band, ring = act-now health */
+.dc-pin { cursor: pointer; outline: none; }
+.dc-pin .in { transition: transform .14s cubic-bezier(.2, .8, .2, 1); transform-box: fill-box; transform-origin: center; }
+.dc-pin .body { stroke: var(--sumi); stroke-width: .28; }
+.dc-pin.b-good .body { fill: var(--dc-good); } .dc-pin.b-watch .body { fill: #d1a443; } .dc-pin.b-act .body { fill: var(--dc-act); }
+.dc-pin .mark { fill: none; stroke: #fbf6ec; stroke-width: .32; stroke-linecap: round; stroke-linejoin: round; }
+.dc-pin.b-watch .mark { stroke: var(--sumi); }
+.dc-pin .ring { fill: none; stroke: none; }
+.dc-pin.is-act .ring { stroke: var(--shu); stroke-width: .38; }
+.dc-pin:hover .in, .dc-pin:focus-visible .in, .dc-pin.is-hover .in { transform: translateY(-.5px) scale(1.35); filter: drop-shadow(0 .5px .4px rgba(31, 27, 23, .55)); }
+.dc-pin:hover .body, .dc-pin:focus-visible .body, .dc-pin.is-hover .body { stroke-width: .5; }
+.dc-pin:focus-visible .ring { stroke: var(--sumi); stroke-width: .3; stroke-dasharray: .6 .4; }
+.dc-pin.big .body { stroke-width: .4; } .dc-pin.big .mark { stroke-width: .5; } .dc-pin.big.is-act .ring { stroke-width: .55; }
+.dc-pin.big .in { transform-origin: center; }
+.dc-pin.big:hover .in, .dc-pin.big:focus-visible .in, .dc-pin.big.is-hover .in { transform: translateY(-.6px) scale(1.12); }
+.dc-pin .nm { font-size: 2.1px; fill: var(--sumi); }
+.dc-pin .ol { font-size: 2.1px; font-weight: 800; fill: var(--sumi2); }
+.dc-pin .ol.b-act { fill: var(--shu2); } .dc-pin .ol.b-good { fill: var(--matcha2); } .dc-pin .ol.b-watch { fill: var(--kin2); }
+@media (prefers-reduced-motion: no-preference) {
+  .dc-pin.is-act .ring { animation: dc-pulse 1.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+  @keyframes dc-pulse { 50% { transform: scale(1.3); opacity: .35; } }
+}
+
+/* city lot plan */
+.dc-map-svg .blk { fill: rgba(251, 246, 236, .75); stroke: rgba(31, 27, 23, .3); stroke-width: .25; }
+.dc-lot { cursor: pointer; outline: none; }
+.dc-lot .lot { fill: transparent; stroke: var(--sumi2); stroke-width: .3; stroke-dasharray: 1 .6; }
+.dc-lot .fs { font-size: 1.9px; fill: var(--sumi2); }
+.dc-lot .pr { font: 400 2.2px var(--display); fill: var(--sumi); }
+.dc-lot .nm { font-size: 1.9px; fill: var(--sumi2); }
+.dc-lot:hover .lot, .dc-lot:focus-visible .lot { stroke: var(--sumi); stroke-width: .45; fill: rgba(201, 154, 60, .12); }
+.dc-lot:focus-visible .lot { stroke: var(--shu); }
+.dc-lot.poor .pr { fill: var(--sumi3); }
+
+/* locked-area popover */
+.dc-map-pop { position: absolute; z-index: 6; width: 230px; padding: 10px 12px 11px; font-size: 12.5px; background: var(--grain), #fbf6ec; border: 1.5px solid var(--sumi); border-radius: var(--edge); box-shadow: var(--lift); }
+.dc-map-pop b { font: 400 14px var(--display); display: block; padding-right: 16px; }
+.dc-map-pop p { margin: 4px 0 6px; color: var(--sumi2); line-height: 1.35; }
+.dc-map-pop ul { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 3px; }
+.dc-map-pop li { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+.dc-map-pop .dc-band { width: 16px; height: 16px; font-size: 10px; }
+.dc-map-pop .x { position: absolute; top: 4px; right: 6px; border: 0; background: none; font: 700 17px var(--body); color: var(--sumi2); cursor: pointer; line-height: 1; }

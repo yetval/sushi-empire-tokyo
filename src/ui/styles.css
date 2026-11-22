@@ -616,3 +616,6 @@ table.books tfoot td { border-top: 2px solid var(--sumi); font-weight: 900; }
 @media (max-width: 1100px) { .ov-top { grid-template-columns: 1fr; } .rules { grid-template-columns: 1fr; } .lot-facts { grid-template-columns: repeat(3, 1fr); } }
 /* keep toasts readable beside an open restaurant sheet */
 #ui-root:has(.sheet-wrap.open) .toasts { right: calc(min(820px, 96vw) + 14px); }
+
+/* disabled always wins over colour variants (they were declared after .btn:disabled) */
+.btn.blue:disabled, .btn.gold:disabled, .btn.green:disabled, .btn.poor:disabled { background: var(--grain), #b8ab98; border-color: #9a8e7e; color: #3f362f; cursor: not-allowed; box-shadow: 0 2px 0 #9a8e7e; }

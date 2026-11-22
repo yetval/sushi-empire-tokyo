@@ -567,7 +567,8 @@ export function endDay(s: GameState): void {
     r.day = emptyDay(s.day + 1);
     r.log = [];
   }
-  const summary = { ...s.today };
+  const rsAll = Object.values(s.restaurants);
+  const summary = { ...s.today, avgStars: rsAll.reduce((a, r) => a + r.reputation, 0) / Math.max(1, rsAll.length) };
   emit('dayEnd', summary);
   s.history.push(summary);
   if (s.history.length > 30) s.history.shift();

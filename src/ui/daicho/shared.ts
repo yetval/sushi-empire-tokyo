@@ -135,9 +135,13 @@ export const BAND_MARK: Record<Band, { glyph: string; word: string }> = {
 };
 
 /** Tiny SVG sparkline (values oldest→newest). Returns '' for < 2 points. Draws a zero line when the series crosses 0. */
-export function spark(values: number[], w = 64, h = 18, cls = ''): string {
+export function spark(raw: number[], w = 64, h = 18, cls = ''): string {
+  const values = raw.filter(Number.isFinite);
   if (values.length < 2) return `<svg class="dc-spark ${cls}" width="${w}" height="${h}" aria-hidden="true"></svg>`;
-  const lo = Math.min(0, ...values), hi = Math.max(...values, lo + 1e-9);
+  const lo0 = Math.min(0, ...values), hi0 = Math.max(0, ...values);
+  // a flat series (e.g. -50k every day) has zero range: pad it so the division stays finite at any magnitude
+  const pad = hi0 - lo0 > 0 ? 0 : Math.max(1, Math.abs(lo0) * 0.1);
+  const lo = lo0 - pad, hi = hi0 + pad;
   const x = (i: number) => (i / (values.length - 1)) * (w - 2) + 1;
   const y = (v: number) => h - 1 - ((v - lo) / (hi - lo)) * (h - 2);
   const d = values.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');

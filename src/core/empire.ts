@@ -80,6 +80,7 @@ export interface EmpireTotals {
   cash: number; restaurants: number; staff: number; revToday: number; profitYesterday: number;
   rev7: number[]; profit7: number[]; pieces7: number[]; // empire-wide daily series (from s.history)
   piecesPerSec: number; avgStars: number; areas: number;
+  stars7: number[]; // empire average rating at each recent day end
 }
 export function empireTotals(s: GameState): EmpireTotals {
   const rs = Object.values(s.restaurants);
@@ -92,6 +93,7 @@ export function empireTotals(s: GameState): EmpireTotals {
     rev7: h.map((d) => d.revenue), profit7: h.map((d) => d.revenue - d.expenses), pieces7: h.map((d) => d.pieces),
     piecesPerSec: pps, avgStars: rs.reduce((a, r) => a + r.reputation, 0) / Math.max(1, rs.length),
     areas: new Set(rs.map((r) => PROPERTIES[r.id].district)).size,
+    stars7: h.map((d) => d.avgStars ?? 0),
   };
 }
 
@@ -102,6 +104,8 @@ export interface Alert {
   id: string; severity: Severity; kind: string; restIds: string[]; text: string;
   fix?: { id: FixId; label: string; cost: number };
   rule?: 'autoHire' | 'autoPrice' | 'autoRestock'; // the house rule that would prevent this
+  propId?: string; // opportunity: the lot to buy (UI opens the buy dialog)
+  areaId?: string; // opportunity: the area to unlock (UI opens the map there)
 }
 
 const names = (s: GameState, ids: string[]) => ids.length === 1 ? s.restaurants[ids[0]].name : `${ids.length} restaurants`;
@@ -143,9 +147,9 @@ export function alerts(s: GameState): Alert[] {
   const losing = group((x) => x.profitYesterday !== null && x.profitYesterday < 0);
   if (losing.length) out.push({ id: 'loss', severity: 'warning', kind: 'money', restIds: losing, text: `${names(s, losing)} lost money yesterday. Check staffing, prices and format.` });
   const lots = Object.values(PROPERTIES).filter((p) => !s.restaurants[p.id] && s.districts.includes(p.district)).sort((a, b) => a.price - b.price);
-  if (lots[0] && s.cash > lots[0].price * 2.5) out.push({ id: 'expand', severity: 'opportunity', kind: 'expand', restIds: [], text: `You can afford a new restaurant: ${lots[0].name} (${yen(lots[0].price)}).` });
+  if (lots[0] && s.cash > lots[0].price * 2.5) out.push({ id: 'expand', severity: 'opportunity', kind: 'expand', restIds: [], text: `You can afford a new restaurant: ${lots[0].name} (${yen(lots[0].price)}).`, propId: lots[0].id });
   const areas = Object.values(AREAS).filter((a) => !s.districts.includes(a.id) && s.lifetime.pieces >= a.unlock.pieces && (!a.unlock.chapter2 || s.flags.chapter2) && s.cash > a.unlock.cost * 1.5);
-  if (areas[0]) out.push({ id: 'area', severity: 'opportunity', kind: 'expand', restIds: [], text: `New market available: ${areas[0].name} (${yen(areas[0].unlock.cost)} permit).` });
+  if (areas[0]) out.push({ id: 'area', severity: 'opportunity', kind: 'expand', restIds: [], text: `New market available: ${areas[0].name} (${yen(areas[0].unlock.cost)} permit).`, areaId: areas[0].id });
   const rank: Record<Severity, number> = { critical: 0, warning: 1, opportunity: 2 };
   return out.sort((a, b) => rank[a.severity] - rank[b.severity]);
 }
@@ -216,7 +220,8 @@ function autoHire(s: GameState, id: string): void {
   const chefs = sim.staffAt(s, id, 'chef').length, slots = sim.slotsFor(s, id, 'chef');
   const cap = capacityPPS(s, id), dem = demandPPS(s, id);
   const wants: Role[] = [];
-  if (chefs === 0 || (dem > cap * 0.95 && chefs < slots)) wants.push('chef');
+  // house rules are deliberately a bit conservative (hire only once clearly overloaded) — a watchful owner does better
+  if (chefs === 0 || (dem > cap * 1.2 && chefs < slots)) wants.push('chef');
   if (c.needsServer) {
     const servers = sim.staffAt(s, id, 'server').length;
     if ((servers === 0 && !sim.staffAt(s, id, 'manager').length) || (servers < Math.min(sim.slotsFor(s, id, 'server'), Math.ceil((chefs + 1) / 3)))) wants.push('server');
@@ -234,8 +239,9 @@ function autoPrice(s: GameState, id: string): void {
   if (cap <= 0) return;
   const load = demandPPS(s, id) / cap;
   const before = r.priceMult;
-  if (load > 1.1 && r.priceMult < 2) A.setPrice(s, id, r.priceMult + 0.05);
-  else if (load < 0.65 && r.priceMult > 0.8) A.setPrice(s, id, r.priceMult - 0.05);
+  // conservative band: never prices below 90% or above 160% on its own
+  if (load > 1.15 && r.priceMult < 1.6) A.setPrice(s, id, r.priceMult + 0.05);
+  else if (load < 0.6 && r.priceMult > 0.9) A.setPrice(s, id, r.priceMult - 0.05);
   if (r.priceMult !== before) receipt(s, id, `Prices ${r.priceMult > before ? 'up' : 'down'} to ${Math.round(r.priceMult * 100)}%`);
 }
 

@@ -16,6 +16,15 @@ export class Daicho {
   private acc = 0;
   private last!: Snap;
   private readonly onKey = (e: KeyboardEvent) => {
+    // game.ts ignores 1/2/3 while Manage is open (input disabled), so the dashboard handles speed keys itself
+    const t = e.target as HTMLElement;
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && !t.closest('input, textarea, select') && (e.key === '1' || e.key === '2' || e.key === '3')) {
+      e.preventDefault();
+      this.ctx.host.setPaused(false);
+      this.ctx.host.setSpeed(({ '1': 1, '2': 2, '3': 4 } as const)[e.key]);
+      this.rebuild();
+      return;
+    }
     if (e.key === 'Escape' && this.ctx.store.st.area) {
       // climb City → Empire instead of letting Manage close
       e.preventDefault(); e.stopPropagation();
