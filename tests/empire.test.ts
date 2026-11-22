@@ -116,7 +116,8 @@ describe('tycoon review B regressions', () => {
   it('restock fix buys only the low ingredients and charges what it shows', () => {
     s.cash = 1e6;
     E.hireBest(s, 'asakusa_stand', 'chef'); E.hireBest(s, 'asakusa_stand', 'server');
-    for (const k of Object.keys(s.inventory)) (s.inventory as any)[k] = 500;
+    for (const k of Object.keys(s.inventory)) (s.inventory as any)[k] = 0;
+    s.inventory.rice = 150; s.inventory.nori = 80; s.inventory.cucumber = 80; // plenty, within storage
     s.inventory.salmon = 0;
     const a = E.alerts(s).find((x) => x.id === 'stock')!;
     expect(a.ingredients).toEqual(['salmon']);
